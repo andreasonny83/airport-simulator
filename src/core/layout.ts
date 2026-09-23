@@ -44,3 +44,18 @@ export function layoutRunways(world: WorldSize): Runway[] {
     };
   });
 }
+
+/**
+ * Painted runway number, as on a real airfield: the landing direction's
+ * compass bearing in tens of degrees, 01–36 (north is 36, never 00).
+ *
+ * "North" is up the screen at the default camera, i.e. sim -y. A heading
+ * of 0 (+x, east) is bearing 090 → "09".
+ */
+export function runwayDesignator(heading: number): string {
+  const dir = headingVector(heading);
+  // atan2(east, north) gives a clockwise-from-north bearing.
+  const bearing = ((Math.atan2(dir.x, -dir.y) * 180) / Math.PI + 360) % 360;
+  const tens = Math.round(bearing / 10) % 36 || 36;
+  return String(tens).padStart(2, "0");
+}

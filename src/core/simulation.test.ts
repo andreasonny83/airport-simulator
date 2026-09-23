@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createPlane } from "./plane";
-import { startGame, step } from "./simulation";
+import { startGame, step, togglePause } from "./simulation";
 import { createGameState } from "./state";
 
 /** Deterministic rng for reproducible spawns. */
@@ -53,5 +53,39 @@ describe("step", () => {
     state.planes = [];
     step(state, state.spawnInterval + 0.001, rng);
     expect(state.planes).toHaveLength(1);
+  });
+});
+
+describe("togglePause", () => {
+  it("freezes planes, timers and spawning while paused", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    expect(togglePause(state)).toBe(true);
+    expect(state.phase).toBe("paused");
+
+    const before = structuredClone(state);
+    // Long enough to move planes and trigger several spawns if not frozen.
+    expect(step(state, state.spawnInterval * 3, rng)).toEqual([]);
+    expect(state).toEqual(before);
+  });
+
+  it("continues where it left off", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    const start = { ...state.planes[0]!.pos };
+    togglePause(state);
+    togglePause(state);
+    expect(state.phase).toBe("playing");
+    step(state, 0.5, rng);
+    expect(state.planes[0]!.pos).not.toEqual(start);
+  });
+
+  it("does nothing on the start and game-over screens", () => {
+    const state = createGameState(16 / 9);
+    expect(togglePause(state)).toBe(false);
+    expect(state.phase).toBe("start");
+    state.phase = "gameover";
+    expect(togglePause(state)).toBe(false);
+    expect(state.phase).toBe("gameover");
   });
 });

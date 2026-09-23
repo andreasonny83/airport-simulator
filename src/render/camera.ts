@@ -18,7 +18,8 @@ const TILT = 0.6;
 const CAMERA_RADIUS = 400;
 /** Extra margin around the playfield when fitting the view. */
 const FIT_PADDING = 1.04;
-const ZOOM_MIN = 0.7;
+/** Lowest zoom shows ~2× the playfield; the landscape map is sized to cover it. */
+const ZOOM_MIN = 0.45;
 const ZOOM_MAX = 2.5;
 /** How quickly the camera eases towards its target (1 / seconds). */
 const EASE_RATE = 10;

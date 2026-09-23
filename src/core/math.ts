@@ -1,7 +1,7 @@
 /**
  * Small, dependency-free math helpers for the 2D simulation.
  */
-import type { Vec2 } from "./types";
+import type { Rng, Vec2 } from "./types";
 
 const TWO_PI = Math.PI * 2;
 
@@ -38,4 +38,20 @@ export function headingVector(heading: number): Vec2 {
 /** Linear interpolation between `a` and `b` by `t` (0 → a, 1 → b). */
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
+}
+
+/**
+ * Seeded PRNG (mulberry32): tiny, fast and good enough for decoration.
+ * The same seed always yields the same sequence, so procedural scenery is
+ * stable across reloads. Not suitable for anything security-related.
+ */
+export function mulberry32(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

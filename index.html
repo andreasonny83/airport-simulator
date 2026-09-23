@@ -20,6 +20,32 @@
       </div>
     </div>
 
+    <!-- Pause / continue (only shown during a shift) -->
+    <div class="absolute top-4 right-4 z-10">
+      <button
+        id="pauseBtn"
+        class="hud-button hidden"
+        title="Pause (P / Esc)"
+        aria-label="Pause"
+        aria-pressed="false"
+      >
+        ⏸
+      </button>
+    </div>
+
+    <!-- Paused banner: pointer-events-none so the camera buttons still work -->
+    <div
+      id="pausedBanner"
+      class="pointer-events-none absolute inset-0 z-10 hidden items-center justify-center"
+    >
+      <div
+        class="rounded-2xl border border-slate-700 bg-slate-900/70 px-8 py-4 text-center shadow-lg backdrop-blur-sm"
+      >
+        <div class="glow-text text-4xl font-black tracking-widest text-sky-400">PAUSED</div>
+        <div class="mt-1 text-sm text-slate-300">Press ▶, P or Esc to continue</div>
+      </div>
+    </div>
+
     <!-- Camera controls (buttons only: every drag on the canvas draws a path) -->
     <div class="absolute right-4 bottom-4 z-10 flex gap-2" aria-label="Camera controls">
       <button id="rotateLeftBtn" class="hud-button" title="Rotate left" aria-label="Rotate left">

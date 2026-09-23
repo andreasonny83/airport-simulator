@@ -51,7 +51,8 @@ export const PATH_MIN_SPACING = 1.2;
 // Runways & landing
 // ---------------------------------------------------------------------------
 
-export const RUNWAY_LENGTH = 16;
+/** Strip size. Long and narrow-ish so it reads as a real runway. */
+export const RUNWAY_LENGTH = 24;
 export const RUNWAY_WIDTH = 5;
 
 /** Distance from the runway end to the threshold marker. */
@@ -64,7 +65,7 @@ export const LANDING_RADIUS = PLANE_RADIUS * 2;
 export const LANDING_ANGLE_TOLERANCE = Math.PI / 3;
 
 /** Distance rolled along the runway before the plane disappears. */
-export const LANDING_ROLL_DISTANCE = 8;
+export const LANDING_ROLL_DISTANCE = 14;
 
 /** Rollout speed as a fraction of cruise: starts fast, ends slow. */
 export const LANDING_SPEED_START = 0.8;
@@ -80,8 +81,9 @@ export const RUNWAY_LAYOUT: ReadonlyArray<{
   fy: number;
   heading: number;
 }> = [
-  { color: "red", fx: 0.25, fy: 0.7, heading: (-3 * Math.PI) / 4 },
-  { color: "blue", fx: 0.75, fy: 0.7, heading: -Math.PI / 4 },
+  // fy 0.72 (not 0.7) keeps the long diagonal strips clear of the stream.
+  { color: "red", fx: 0.25, fy: 0.72, heading: (-3 * Math.PI) / 4 },
+  { color: "blue", fx: 0.75, fy: 0.72, heading: -Math.PI / 4 },
   { color: "yellow", fx: 0.5, fy: 0.3, heading: 0 },
 ];
 
@@ -97,6 +99,60 @@ export const SPAWN_INTERVAL_MIN = 1;
 
 /** Max random deviation from "straight inward" for a spawn heading (±0.5 rad). */
 export const SPAWN_HEADING_JITTER = 0.5;
+
+// ---------------------------------------------------------------------------
+// Landscape (purely decorative — the sim never reads any of this)
+// ---------------------------------------------------------------------------
+
+/**
+ * The scenery map is a square `MAP_SCALE × max(width, height)` on a side,
+ * centred on the playfield. Square (rather than matching the playfield's
+ * aspect) so rotating the camera never reveals an edge on the short axis.
+ */
+export const MAP_SCALE = 6;
+
+/** Fixed seed: the stream and trees look the same on every load and resize. */
+export const SCENERY_SEED = 0x5eed_a1e;
+
+/** Width of the water surface (world units). */
+export const STREAM_WIDTH = 4;
+
+/**
+ * Peak deviation of the main meander from the base line. The centreline adds
+ * a second, smaller sine (40% of this), so the total swing is ±1.4×.
+ */
+export const STREAM_AMPLITUDE = 4.5;
+
+/** Wavelength of the main meander (world units). */
+export const STREAM_WAVELENGTH = 60;
+
+/**
+ * Base line of the stream as a fraction of the world height. 0.5 threads it
+ * between the yellow runway (fy 0.3) and the red/blue pair (fy 0.72).
+ */
+export const STREAM_BASE_FY = 0.5;
+
+/** Candidate trees per 1000 units² (before rejection / density thinning). */
+export const TREE_DENSITY = 2.5;
+
+/** No tree closer than this to any runway edge. */
+export const TREE_RUNWAY_CLEARANCE = 6;
+
+/** No tree closer than this to the stream's water edge (≥ canopy radius). */
+export const TREE_STREAM_CLEARANCE = 3;
+
+/**
+ * Tree size range. A scale-1 tree is ~3.5 units tall and ~2.5 wide (so up
+ * to ~5.5 × 4 here, deliberately oversized to read at game zoom) — taller
+ * than `FLIGHT_ALTITUDE`, which is fine: planes, paths and warning rings draw
+ * in a later rendering group (see render/scene.ts), so they always show on
+ * top of the scenery.
+ */
+export const TREE_SCALE_MIN = 1.0;
+export const TREE_SCALE_MAX = 1.6;
+
+/** Fraction of trees that are conifers; the rest are broadleaf. */
+export const TREE_CONIFER_SHARE = 0.35;
 
 // ---------------------------------------------------------------------------
 // Loop

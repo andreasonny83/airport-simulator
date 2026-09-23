@@ -6,7 +6,7 @@
  */
 import "./style.css";
 import { MAX_DT } from "./config";
-import { startGame, step } from "./core/simulation";
+import { startGame, step, togglePause } from "./core/simulation";
 import { createGameState, resizeWorld } from "./core/state";
 import type { SimEvent } from "./core/types";
 import { attachPointerInput } from "./input/pointer";
@@ -22,7 +22,7 @@ const ROTATE_STEP = Math.PI / 6;
 const ZOOM_STEP = 1.25;
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-const { engine, scene } = createScene(canvas);
+const { engine, scene, shadows } = createScene(canvas);
 const aspect = () => engine.getRenderWidth() / engine.getRenderHeight();
 
 // --- State (pure data, advanced only by `step`) ----------------------------
@@ -30,7 +30,7 @@ const state = createGameState(aspect());
 
 // --- Rendering ---------------------------------------------------------------
 const cameraController = new CameraController(scene, canvas);
-const sceneSync = new SceneSync(scene, new MeshFactory(scene));
+const sceneSync = new SceneSync(scene, new MeshFactory(scene), shadows);
 
 function applyWorldSize(): void {
   resizeWorld(state, aspect());
@@ -40,17 +40,35 @@ function applyWorldSize(): void {
 applyWorldSize();
 
 // --- UI + input ----------------------------------------------------------------
+function setPaused(paused: boolean): void {
+  if ((state.phase === "paused") !== paused && togglePause(state)) hud.setPhase(state.phase);
+}
+
 const hud = createHud({
   onStart: () => {
     startGame(state);
     hud.setScore(state.score);
     hud.hideOverlay();
+    hud.setPhase(state.phase);
   },
+  onTogglePause: () => setPaused(state.phase !== "paused"),
   onRotate: (dir) => cameraController.rotateBy(dir * ROTATE_STEP),
   onZoom: (dir) => cameraController.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
 });
 
 attachPointerInput(canvas, scene, cameraController.camera, () => state);
+
+// Keyboard shortcut: P or Esc toggles pause.
+window.addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  if (e.key === "p" || e.key === "P" || e.key === "Escape") setPaused(state.phase !== "paused");
+});
+
+// Auto-pause when the tab is hidden, so switching away never costs a crash.
+// Stays paused on return: the player continues when they're ready.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) setPaused(true);
+});
 
 window.addEventListener("resize", () => {
   engine.resize();
@@ -64,6 +82,7 @@ function handleEvent(event: SimEvent): void {
       break;
     case "crash":
       hud.showGameOver(state.score);
+      hud.setPhase(state.phase);
       break;
     case "spawned":
       break;
@@ -76,7 +95,9 @@ engine.runRenderLoop(() => {
   // Seconds since last frame, clamped so a backgrounded tab doesn't make
   // planes teleport (and tunnel through each other) when it resumes.
   const dt = Math.min(engine.getDeltaTime() / 1000, MAX_DT);
-  time += dt;
+  // Animation clock (warning pulse, water shimmer) stops while paused too, so
+  // the whole scene freezes. The camera below still eases on real dt.
+  if (state.phase !== "paused") time += dt;
 
   for (const event of step(state, dt)) handleEvent(event);
 

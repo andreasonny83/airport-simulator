@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { WORLD_HEIGHT } from "../config";
-import { computeWorldSize, layoutRunways } from "./layout";
+import { RUNWAY_LAYOUT, WORLD_HEIGHT } from "../config";
+import { computeWorldSize, layoutRunways, runwayDesignator } from "./layout";
 import { distance } from "./math";
 
 describe("layout", () => {
@@ -11,8 +11,9 @@ describe("layout", () => {
   it("places runways relative to world size", () => {
     const world = computeWorldSize(16 / 9);
     const [red] = layoutRunways(world);
-    expect(red!.center.x).toBeCloseTo(world.width * 0.25);
-    expect(red!.center.y).toBeCloseTo(world.height * 0.7);
+    const spec = RUNWAY_LAYOUT[0]!;
+    expect(red!.center.x).toBeCloseTo(world.width * spec.fx);
+    expect(red!.center.y).toBeCloseTo(world.height * spec.fy);
   });
 
   it("drops the yellow runway on narrow (portrait) screens", () => {
@@ -28,5 +29,14 @@ describe("layout", () => {
       const dot = toCenter.x * Math.cos(r.heading) + toCenter.y * Math.sin(r.heading);
       expect(dot).toBeCloseTo(distance(r.center, r.threshold));
     }
+  });
+
+  it("numbers runways by compass bearing of the landing direction", () => {
+    expect(runwayDesignator(0)).toBe("09"); // east
+    expect(runwayDesignator(Math.PI / 2)).toBe("18"); // +y = down the screen = south
+    expect(runwayDesignator(Math.PI)).toBe("27"); // west
+    expect(runwayDesignator(-Math.PI / 2)).toBe("36"); // north is 36, not 00
+    expect(runwayDesignator(-Math.PI / 4)).toBe("05"); // NE, 045°
+    expect(runwayDesignator((-3 * Math.PI) / 4)).toBe("32"); // NW, 315°
   });
 });

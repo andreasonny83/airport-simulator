@@ -4,18 +4,20 @@
  * Meshes are matched to planes by id: new ids get meshes, missing ids have
  * theirs disposed. The simulation never touches Babylon objects.
  */
+import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateLines } from "@babylonjs/core/Meshes/Builders/linesBuilder";
 import type { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
-import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import { COLOR_HEX, FLIGHT_ALTITUDE } from "../config";
 import { lerp } from "../core/math";
 import type { GameState, Plane, WorldSize } from "../core/types";
 import { headingToRotationY, toScene } from "./coords";
-import { Ground } from "./ground";
+import { Landscape } from "./landscape";
 import type { MeshFactory } from "./meshes";
+import { RunwayFactory, type RunwayView } from "./runway";
+import { fitShadowsToWorld, OVERLAY_GROUP } from "./scene";
 
 /** Height of drawn path lines: on the ground, like a shadow of the route. */
 const PATH_ALTITUDE = 0.15;
@@ -32,27 +34,33 @@ interface PlaneView {
 
 export class SceneSync {
   private readonly views = new Map<number, PlaneView>();
-  private runwayNodes: TransformNode[] = [];
-  private readonly ground: Ground;
+  private runwayViews: RunwayView[] = [];
+  private readonly landscape: Landscape;
+  private readonly runwayFactory: RunwayFactory;
 
   constructor(
     private readonly scene: Scene,
     private readonly factory: MeshFactory,
+    private readonly shadows: ShadowGenerator,
   ) {
-    this.ground = new Ground(scene);
+    this.landscape = new Landscape(scene, shadows);
+    this.runwayFactory = new RunwayFactory(scene, (color) => factory.material(color));
   }
 
-  /** Rebuild static geometry (ground, runways) after a resize. */
+  /** Rebuild static geometry (landscape, runways) after a resize. */
   rebuildWorld(state: GameState): void {
-    this.ground.setWorld(state.world);
-    for (const node of this.runwayNodes) node.dispose();
-    this.runwayNodes = state.runways.map((r) => this.factory.createRunway(r, state.world));
+    fitShadowsToWorld(this.shadows, state.world);
+    this.landscape.setWorld(state.world, state.runways);
+    for (const view of this.runwayViews) view.dispose();
+    this.runwayViews = state.runways.map((r) => this.runwayFactory.create(r, state.world));
     // Path lines were built with the old world→scene mapping; force a rebuild.
     for (const view of this.views.values()) view.pathVersion = -1;
   }
 
   /** Create/update/dispose plane meshes to match `state.planes`. */
   syncPlanes(state: GameState, time: number): void {
+    this.landscape.update(time);
+    for (const runway of this.runwayViews) runway.update(time);
     const alive = new Set<number>();
     for (const plane of state.planes) {
       alive.add(plane.id);
@@ -65,12 +73,14 @@ export class SceneSync {
           pathVersion: -1,
         };
         this.views.set(plane.id, view);
+        this.shadows.addShadowCaster(view.mesh);
       }
       this.updateView(view, plane, state.world, time);
     }
 
     for (const [id, view] of this.views) {
       if (alive.has(id)) continue;
+      this.shadows.removeShadowCaster(view.mesh);
       view.mesh.dispose();
       view.ring.dispose();
       view.path?.dispose();
@@ -119,6 +129,7 @@ export class SceneSync {
     line.color = Color3.FromHexString(COLOR_HEX[plane.color]);
     line.alpha = 0.8;
     line.isPickable = false;
+    line.renderingGroupId = OVERLAY_GROUP; // stays visible over trees
     view.path = line;
   }
 }

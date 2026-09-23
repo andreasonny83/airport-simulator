@@ -22,6 +22,18 @@ export function startGame(state: GameState, rng: Rng = Math.random): void {
 }
 
 /**
+ * Pause a running shift, or continue a paused one. No-op on the start and
+ * game-over screens, so a stray key press can't resurrect a finished game.
+ * @returns true if the phase changed.
+ */
+export function togglePause(state: GameState): boolean {
+  if (state.phase === "playing") state.phase = "paused";
+  else if (state.phase === "paused") state.phase = "playing";
+  else return false;
+  return true;
+}
+
+/**
  * Advance the game by `dt` seconds.
  * @returns what happened this step, for the UI and renderer to react to.
  */

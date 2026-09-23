@@ -1,5 +1,6 @@
 /**
- * Mesh + material factory: low-poly planes, runways and warning rings.
+ * Mesh + material factory: low-poly planes and warning rings (runways live
+ * in runway.ts).
  *
  * Plane meshes are built once per colour as a hidden template and then
  * cloned, so every plane of a colour shares geometry and material.
@@ -7,26 +8,19 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
-import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
-import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { COLOR_HEX, PLANE_RADIUS, RUNWAY_THRESHOLD_INSET } from "../config";
-import type { Runway, RunwayColor, WorldSize } from "../core/types";
-import { headingToRotationY, toScene } from "./coords";
+import { COLOR_HEX, PLANE_RADIUS } from "../config";
+import type { RunwayColor } from "../core/types";
+import { OVERLAY_GROUP } from "./scene";
 
 export class MeshFactory {
   private readonly colorMaterials = new Map<RunwayColor, StandardMaterial>();
   private readonly planeTemplates = new Map<RunwayColor, Mesh>();
-  private readonly asphalt: StandardMaterial;
-  private readonly paint: StandardMaterial;
   private readonly warning: StandardMaterial;
 
   constructor(private readonly scene: Scene) {
-    this.asphalt = this.makeMaterial("asphalt", "#334155", 0.15);
-    this.paint = this.makeMaterial("paint", "#e2e8f0", 0.6);
-
     // Warning ring: unlit, translucent red that the sync layer pulses.
     this.warning = new StandardMaterial("warning", scene);
     this.warning.disableLighting = true;
@@ -53,6 +47,7 @@ export class MeshFactory {
     }
     const mesh = template.clone(name);
     mesh.setEnabled(true);
+    mesh.renderingGroupId = OVERLAY_GROUP; // set per clone: not copied from the template
     return mesh;
   }
 
@@ -65,54 +60,8 @@ export class MeshFactory {
     );
     ring.material = this.warning;
     ring.isPickable = false;
+    ring.renderingGroupId = OVERLAY_GROUP;
     return ring;
-  }
-
-  /**
-   * Build a runway as a group of meshes under one node, rotated so local +x is
-   * the landing direction: asphalt strip, coloured threshold bar, a white
-   * arrow showing which way to land, and a dashed centreline.
-   */
-  createRunway(runway: Runway, world: WorldSize): TransformNode {
-    const root = new TransformNode(`runway-${runway.color}`, this.scene);
-    root.position = toScene(runway.center, world);
-    root.rotation.y = headingToRotationY(runway.heading);
-
-    const L = runway.length;
-    const W = runway.width;
-    const thresholdX = -(L / 2 - RUNWAY_THRESHOLD_INSET);
-
-    const strip = CreateBox("strip", { width: L, height: 0.1, depth: W }, this.scene);
-    strip.material = this.asphalt;
-    strip.position.y = 0.05;
-
-    const bar = CreateBox("threshold", { width: 1.2, height: 0.12, depth: W - 0.6 }, this.scene);
-    bar.material = this.material(runway.color);
-    bar.position.set(thresholdX, 0.06, 0);
-
-    // A 3-sided disc is a triangle; its first vertex points along +x.
-    const arrow = CreateDisc(
-      "arrow",
-      { radius: 0.9, tessellation: 3, sideOrientation: Mesh.DOUBLESIDE },
-      this.scene,
-    );
-    arrow.material = this.paint;
-    arrow.rotation.x = Math.PI / 2; // lay flat on the ground
-    arrow.position.set(thresholdX + 1.8, 0.13, 0);
-
-    const parts: Mesh[] = [strip, bar, arrow];
-    for (let x = thresholdX + 3.5; x < L / 2 - 1; x += 2.2) {
-      const dash = CreateBox("dash", { width: 1.1, height: 0.12, depth: 0.2 }, this.scene);
-      dash.material = this.paint;
-      dash.position.set(x, 0.06, 0);
-      parts.push(dash);
-    }
-
-    for (const part of parts) {
-      part.parent = root;
-      part.isPickable = false;
-    }
-    return root;
   }
 
   /** Merge a few boxes into a simple airliner silhouette. */

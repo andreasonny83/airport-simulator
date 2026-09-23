@@ -29,8 +29,11 @@ export type RunwayColor = "red" | "blue" | "yellow";
  */
 export type PlanePhase = "flying" | "landing" | "landed";
 
-/** Top-level game phase, drives which overlay the UI shows. */
-export type GamePhase = "start" | "playing" | "gameover";
+/**
+ * Top-level game phase, drives which overlay the UI shows. `step` only
+ * advances the sim while `playing`, so `paused` freezes everything in place.
+ */
+export type GamePhase = "start" | "playing" | "paused" | "gameover";
 
 /** Size of the playfield in world units (height is fixed, width follows aspect). */
 export interface WorldSize {
