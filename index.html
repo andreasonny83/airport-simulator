@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Radar Command — Air Traffic Control</title>
+  </head>
+  <body class="relative text-slate-100">
+    <!-- Score -->
+    <div class="pointer-events-none absolute top-4 left-4 z-10">
+      <div
+        class="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 shadow-lg backdrop-blur-sm"
+      >
+        <span class="text-sm font-bold tracking-wider text-slate-400 uppercase">Landed</span>
+        <div id="scoreDisplay" class="glow-text text-3xl font-black text-sky-400">0</div>
+      </div>
+    </div>
+
+    <!-- Camera controls (buttons only: every drag on the canvas draws a path) -->
+    <div class="absolute right-4 bottom-4 z-10 flex gap-2" aria-label="Camera controls">
+      <button id="rotateLeftBtn" class="hud-button" title="Rotate left" aria-label="Rotate left">
+        ⟲
+      </button>
+      <button id="rotateRightBtn" class="hud-button" title="Rotate right" aria-label="Rotate right">
+        ⟳
+      </button>
+      <button id="zoomOutBtn" class="hud-button" title="Zoom out" aria-label="Zoom out">−</button>
+      <button id="zoomInBtn" class="hud-button" title="Zoom in" aria-label="Zoom in">+</button>
+    </div>
+
+    <!-- Start / game-over overlay -->
+    <div
+      id="overlay"
+      class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-md transition-opacity duration-300"
+    >
+      <h1 id="overlayTitle" class="glow-text mb-4 text-5xl font-black text-sky-400 md:text-6xl">
+        RADAR COMMAND
+      </h1>
+      <p id="overlayMessage" class="mb-8 max-w-md px-4 text-center text-lg text-slate-300">
+        Drag a path from the airplanes to their matching colored runways. Land them over the colored
+        threshold, following the arrow. Don't let them crash!
+      </p>
+      <button
+        id="startBtn"
+        class="transform rounded-full bg-sky-500 px-8 py-4 text-xl font-bold text-slate-950 shadow-[0_0_20px_rgba(14,165,233,0.5)] transition-all hover:scale-105 hover:bg-sky-400 active:scale-95"
+      >
+        START SHIFT
+      </button>
+    </div>
+
+    <canvas id="renderCanvas"></canvas>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
