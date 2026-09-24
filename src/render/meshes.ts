@@ -11,7 +11,7 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
-import { COLOR_HEX, PLANE_RADIUS } from "../config";
+import { ANCHOR_RADIUS, COLOR_HEX, PLANE_RADIUS } from "../config";
 import type { RunwayColor } from "../core/types";
 import { OVERLAY_GROUP } from "./scene";
 
@@ -19,6 +19,7 @@ export class MeshFactory {
   private readonly colorMaterials = new Map<RunwayColor, StandardMaterial>();
   private readonly planeTemplates = new Map<RunwayColor, Mesh>();
   private readonly warning: StandardMaterial;
+  private readonly anchor: StandardMaterial;
 
   constructor(private readonly scene: Scene) {
     // Warning ring: unlit, translucent red that the sync layer pulses.
@@ -26,6 +27,11 @@ export class MeshFactory {
     this.warning.disableLighting = true;
     this.warning.emissiveColor = Color3.FromHexString("#ef4444");
     this.warning.alpha = 0.5;
+
+    // Anchor ring: unlit green "connected" marker, pulsed by the sync layer.
+    this.anchor = new StandardMaterial("anchor", scene);
+    this.anchor.disableLighting = true;
+    this.anchor.emissiveColor = Color3.FromHexString("#22c55e");
   }
 
   /** Shared material for a runway/plane colour. */
@@ -61,6 +67,23 @@ export class MeshFactory {
     ring.material = this.warning;
     ring.isPickable = false;
     ring.renderingGroupId = OVERLAY_GROUP;
+    return ring;
+  }
+
+  /**
+   * Flat green ring marking the anchor area around a runway threshold,
+   * shown while a plane's path is locked onto it.
+   */
+  createAnchorRing(name: string): Mesh {
+    const ring = CreateTorus(
+      name,
+      { diameter: ANCHOR_RADIUS * 2, thickness: 0.5, tessellation: 48 },
+      this.scene,
+    );
+    ring.material = this.anchor;
+    ring.isPickable = false;
+    ring.renderingGroupId = OVERLAY_GROUP;
+    ring.setEnabled(false);
     return ring;
   }
 

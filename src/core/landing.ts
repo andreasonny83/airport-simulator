@@ -24,7 +24,9 @@ export function checkLanding(plane: Plane, runways: readonly Runway[]): Runway |
 
     plane.phase = "landing";
     plane.heading = runway.heading; // snap onto the runway centreline heading
+    plane.turnRate = 0; // wings level for the rollout (the renderer eases the visuals)
     plane.path = [];
+    plane.pathAnchored = false;
     plane.pathVersion++;
     plane.landingProgress = 0;
     plane.warning = false;

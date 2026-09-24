@@ -12,7 +12,7 @@ import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { PLANE_GRAB_RADIUS } from "../config";
 import { distance } from "../core/math";
-import { appendPathPoint, startPath } from "../core/path";
+import { anchorPath, appendPathPoint, startPath } from "../core/path";
 import type { GameState, Plane, Vec2 } from "../core/types";
 import { fromScene } from "../render/coords";
 
@@ -101,7 +101,10 @@ export function attachPointerInput(
     }
     const { x, y } = toCanvas(e);
     const point = screenToWorld(scene, camera, state, x, y);
-    if (point) appendPathPoint(plane, point);
+    if (!point || !appendPathPoint(plane, point)) return;
+    // Reached the runway from the right direction: the path snaps onto the
+    // threshold and is finished, so this pointer stops routing the plane.
+    if (anchorPath(plane, state.runways)) active.delete(e.pointerId);
   };
 
   const onUp = (e: PointerEvent) => {

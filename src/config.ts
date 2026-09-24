@@ -41,6 +41,47 @@ export const PLANE_GRAB_RADIUS = PLANE_RADIUS * 3;
 export const FLIGHT_ALTITUDE = 3;
 
 // ---------------------------------------------------------------------------
+// Steering (see core/plane.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fastest a plane can change heading (rad / second, ~110°/s). Together with
+ * `PLANE_SPEED` this sets the tightest possible turn radius:
+ * `PLANE_SPEED / MAX_TURN_RATE` ≈ 3.7 units. A U-turn is a smooth arc, never
+ * an instant flip.
+ */
+export const MAX_TURN_RATE = 1.9;
+
+/**
+ * How hard a plane steers towards its target heading: commanded turn rate
+ * (rad/s) per radian of heading error, before `MAX_TURN_RATE` caps it.
+ * Small errors get gentle corrections, so the plane eases onto its heading
+ * instead of snapping.
+ */
+export const TURN_RESPONSE = 2.5;
+
+/**
+ * Time constant (seconds) for the actual turn rate to catch up with the
+ * commanded one: the plane has to roll into and out of a bank. With
+ * `TURN_RESPONSE` this gives a well-damped response (damping ratio ≈ 0.8),
+ * so planes settle onto a heading without visible wobble.
+ */
+export const TURN_LAG = 0.15;
+
+/** A waypoint within this distance of the plane counts as reached. */
+export const WAYPOINT_CAPTURE_RADIUS = 1.5;
+
+/**
+ * Fixed sub-step (seconds) for flight integration. Steering is a feedback
+ * loop, so a frame's dt is split into slices this size. That way 30, 60 and
+ * 144 Hz displays fly the same curves.
+ */
+export const FLIGHT_SUBSTEP = 1 / 120;
+
+/** Visual only: bank angle (radians, ~35°) when turning at `MAX_TURN_RATE`. */
+export const MAX_BANK = 0.6;
+
+// ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
@@ -63,6 +104,13 @@ export const LANDING_RADIUS = PLANE_RADIUS * 2;
 
 /** Max difference between plane heading and runway heading (±60°). */
 export const LANDING_ANGLE_TOLERANCE = Math.PI / 3;
+
+/**
+ * A path dragged to within this distance of its runway's threshold snaps
+ * onto it and locks ("anchors"), if it arrives from the landing direction.
+ * Generous (a runway width) so the player doesn't have to be pixel-perfect.
+ */
+export const ANCHOR_RADIUS = RUNWAY_WIDTH;
 
 /** Distance rolled along the runway before the plane disappears. */
 export const LANDING_ROLL_DISTANCE = 14;

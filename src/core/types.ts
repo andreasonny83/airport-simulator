@@ -48,6 +48,12 @@ export interface Plane {
   pos: Vec2;
   /** Direction of travel in radians (see file header for convention). */
   heading: number;
+  /**
+   * Current rate of heading change (rad/s, positive = heading increasing).
+   * Heading only ever changes through this, so turns are always smooth arcs.
+   * The renderer also uses it to bank the plane into turns.
+   */
+  turnRate: number;
   /** Remaining waypoints drawn by the player, consumed front-to-back. */
   path: Vec2[];
   /**
@@ -60,6 +66,12 @@ export interface Plane {
   landingProgress: number;
   /** True while another flying plane is dangerously close. */
   warning: boolean;
+  /**
+   * True once the drawn path has been snapped onto this plane's runway
+   * threshold (see `anchorPath`). The path then ends exactly on the
+   * threshold, and further drag points are ignored until a new path starts.
+   */
+  pathAnchored: boolean;
 }
 
 export interface Runway {
