@@ -1,6 +1,6 @@
 /**
- * Low-poly river boats: a little sailboat and a motorboat, each with a
- * faint V-shaped wake, synced every frame from `core/boats.ts` traffic.
+ * Low-poly river boats: a little sailboat and a motorboat, synced every
+ * frame from `core/boats.ts` traffic.
  *
  * Each model is built once as a template (flat-shaded, colours baked into
  * vertex colours, like the trees' canopies), then cloned per boat so every
@@ -18,10 +18,6 @@ import { headingToRotationY, toScene } from "./coords";
 
 /** Water surface height (matches landscape.ts `WATER_Y`). */
 const WATER_Y = 0.04;
-/** Wake sits just above the water, still under the runways (0.05+). */
-const WAKE_Y = 0.045;
-/** Peak opacity of the wake at full boat visibility. */
-const WAKE_ALPHA = 0.6;
 
 /**
  * Boats are modelled at roughly true size next to the planes, then scaled
@@ -62,7 +58,7 @@ class ModelBuilder {
     this.tri(a, c, d, color);
   }
 
-  /** Thin flat panel visible from both sides (sails, wakes). */
+  /** Thin flat panel visible from both sides (sails). */
   panel(a: V3, b: V3, c: V3, color: Color3): void {
     this.tri(a, b, c, color);
     this.tri(a, c, b, color);
@@ -150,30 +146,10 @@ function motorboatModel(scene: Scene): Mesh {
   return b.build("motorboat", scene);
 }
 
-/** Flat V of churned water trailing from the stern. */
-function wakeModel(
-  scene: Scene,
-  name: string,
-  length: number,
-  spread: number,
-  stern: number,
-): Mesh {
-  const b = new ModelBuilder();
-  const white = Color3.White();
-  b.panel([stern, 0, 0], [stern - length, 0, spread], [stern - length * 0.8, 0, 0], white);
-  b.panel([stern, 0, 0], [stern - length * 0.8, 0, 0], [stern - length, 0, -spread], white);
-  return b.build(name, scene);
-}
-
-/** One boat's meshes. */
-interface BoatView {
-  body: Mesh;
-  wake: Mesh;
-}
-
 export class BoatFleet {
-  private readonly templates: Record<BoatKind, { body: Mesh; wake: Mesh }>;
-  private readonly views = new Map<number, BoatView>();
+  /** One hidden template per kind; each boat is a clone. */
+  private readonly templates: Record<BoatKind, Mesh>;
+  private readonly views = new Map<number, Mesh>();
 
   constructor(
     scene: Scene,
@@ -188,24 +164,15 @@ export class BoatFleet {
     bodyMat.backFaceCulling = false;
     bodyMat.twoSidedLighting = true;
 
-    const wakeMat = new StandardMaterial("wakeMat", scene);
-    wakeMat.diffuseColor = Color3.White();
-    wakeMat.emissiveColor = new Color3(0.6, 0.65, 0.7);
-    wakeMat.specularColor = Color3.Black();
-    wakeMat.alpha = WAKE_ALPHA;
-
-    const make = (body: Mesh, wake: Mesh) => {
+    const make = (body: Mesh) => {
       body.material = bodyMat;
-      wake.material = wakeMat;
-      for (const mesh of [body, wake]) {
-        mesh.isVisible = false; // templates only; clones are what's drawn
-        mesh.isPickable = false;
-      }
-      return { body, wake };
+      body.isVisible = false; // templates only; clones are what's drawn
+      body.isPickable = false;
+      return body;
     };
     this.templates = {
-      sailboat: make(sailboatModel(scene), wakeModel(scene, "sailWake", 2.4, 0.7, -1.3)),
-      motorboat: make(motorboatModel(scene), wakeModel(scene, "motorWake", 4.5, 1.3, -1.2)),
+      sailboat: make(sailboatModel(scene)),
+      motorboat: make(motorboatModel(scene)),
     };
   }
 
@@ -214,10 +181,10 @@ export class BoatFleet {
     const alive = new Set<number>();
     for (const boat of traffic.boats) {
       alive.add(boat.id);
-      let view = this.views.get(boat.id);
-      if (!view) {
-        view = this.createView(boat.kind, boat.id);
-        this.views.set(boat.id, view);
+      let body = this.views.get(boat.id);
+      if (!body) {
+        body = this.createView(boat.kind, boat.id);
+        this.views.set(boat.id, body);
       }
 
       const pose = boatPose(traffic.route, boat);
@@ -226,47 +193,38 @@ export class BoatFleet {
       // away from the wind.
       const phase = boat.id * 1.7;
       const heel = boat.kind === "sailboat" ? 0.1 : 0;
-      toScene(pose.pos, world, WATER_Y + 0.03 * Math.sin(time * 2.1 + phase), view.body.position);
-      view.body.rotation.set(
+      toScene(pose.pos, world, WATER_Y + 0.03 * Math.sin(time * 2.1 + phase), body.position);
+      body.rotation.set(
         heel + 0.05 * Math.sin(time * 1.6 + phase),
         yaw,
         0.03 * Math.sin(time * 1.9 + phase),
       );
-      view.body.visibility = pose.opacity;
-
-      toScene(pose.pos, world, WAKE_Y, view.wake.position);
-      view.wake.rotation.y = yaw;
-      view.wake.visibility = pose.opacity;
+      body.visibility = pose.opacity;
     }
 
-    for (const [id, view] of this.views) {
+    for (const [id, body] of this.views) {
       if (alive.has(id)) continue;
-      this.disposeView(view);
+      this.disposeView(body);
       this.views.delete(id);
     }
   }
 
   /** Remove every boat (e.g. before the river is rebuilt). */
   clear(): void {
-    for (const view of this.views.values()) this.disposeView(view);
+    for (const body of this.views.values()) this.disposeView(body);
     this.views.clear();
   }
 
-  private createView(kind: BoatKind, id: number): BoatView {
-    const t = this.templates[kind];
-    const body = t.body.clone(`${kind}-${id}`);
-    const wake = t.wake.clone(`${kind}Wake-${id}`);
+  private createView(kind: BoatKind, id: number): Mesh {
+    const body = this.templates[kind].clone(`${kind}-${id}`);
     body.isVisible = true;
-    wake.isVisible = true;
     body.scaling.setAll(BOAT_SCALE);
-    wake.scaling.setAll(BOAT_SCALE);
     this.shadows.addShadowCaster(body);
-    return { body, wake };
+    return body;
   }
 
-  private disposeView(view: BoatView): void {
-    this.shadows.removeShadowCaster(view.body);
-    view.body.dispose();
-    view.wake.dispose();
+  private disposeView(body: Mesh): void {
+    this.shadows.removeShadowCaster(body);
+    body.dispose();
   }
 }

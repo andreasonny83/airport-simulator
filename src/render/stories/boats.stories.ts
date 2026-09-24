@@ -1,7 +1,7 @@
 /**
  * River boats (render/boats.ts) and their traffic (core/boats.ts).
  *
- * Tuning loop: edit the models, colours, wake or BOAT_SCALE in boats.ts,
+ * Tuning loop: edit the models, colours or BOAT_SCALE in boats.ts,
  * or the traffic (BOAT_TYPES speeds/lanes, BOAT_SPAWN_*, BOAT_MAX,
  * BOAT_ROUTE_MARGIN, BOAT_FADE_DISTANCE) in config.ts, and the story
  * hot-reloads.
