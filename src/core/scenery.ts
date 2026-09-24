@@ -1,5 +1,5 @@
 /**
- * Procedural scenery layout: map bounds, a meandering stream and scattered
+ * Procedural scenery layout: map bounds, a meandering river and scattered
  * trees.
  *
  * This is pure data (no Babylon) so it can be unit-tested like the rest of
@@ -13,10 +13,13 @@
 import {
   MAP_SCALE,
   SCENERY_SEED,
-  STREAM_AMPLITUDE,
+  STREAM_AIRFIELD_CLEARANCE,
+  STREAM_BANK_WIDTH,
   STREAM_BASE_FY,
+  STREAM_MEANDER_ANGLE,
   STREAM_WAVELENGTH,
   STREAM_WIDTH,
+  STREAM_WIDTH_VARIATION,
   TREE_CONIFER_SHARE,
   TREE_DENSITY,
   TREE_RUNWAY_CLEARANCE,
@@ -49,24 +52,35 @@ export interface Tree {
   tint: number;
 }
 
+/** One sample of the stream centreline. */
+export interface StreamPoint extends Vec2 {
+  /** Water width here (world units). */
+  width: number;
+}
+
 export interface Scenery {
   bounds: Bounds;
   /** Stream centreline, sampled left → right across the whole map. */
-  stream: Vec2[];
+  stream: StreamPoint[];
   trees: Tree[];
 }
 
-/** Spacing between stream centreline samples (world units). */
-const STREAM_SAMPLE_STEP = 1.5;
+/** Spacing between stream centreline samples, measured along the river. */
+const STREAM_SAMPLE_STEP = 2.5;
 
 /**
- * The centreline is two sines added together; the second one's amplitude is
- * this fraction of the first. Total swing is `(1 + ratio) × STREAM_AMPLITUDE`.
+ * Steering that pulls the river back towards its base line, so random bends
+ * can't make it wander off across the map. Full strength (`STREAM_PULL`
+ * radians) once it strays `STREAM_PULL_RANGE` units away.
  */
-const STREAM_SECONDARY_RATIO = 0.4;
+const STREAM_PULL = 0.5;
+const STREAM_PULL_RANGE = 10;
 
-/** Max distance of the stream centreline from its base line. */
-export const STREAM_MAX_OFFSET = STREAM_AMPLITUDE * (1 + STREAM_SECONDARY_RATIO);
+/** Hard cap on the flow angle: past 90° the river would flow backwards. */
+const STREAM_MAX_ANGLE = 1.4;
+
+/** Farthest the placement search moves the river off its preferred line. */
+const STREAM_MAX_SHIFT = 150;
 
 // ---------------------------------------------------------------------------
 // Map
@@ -127,29 +141,99 @@ export function valueNoise(x: number, y: number, seed = SCENERY_SEED): number {
 // Stream
 // ---------------------------------------------------------------------------
 
-/**
- * Stream centreline across the full map width: the sum of two sines around
- * `STREAM_BASE_FY × height`. Random phases come from `rng`, so a seeded rng
- * gives the same river every time.
- */
-export function streamCenterline(world: WorldSize, rng: Rng): Vec2[] {
-  const bounds = mapBounds(world);
-  const baseY = world.height * STREAM_BASE_FY;
-  const phase1 = rng() * Math.PI * 2;
-  const phase2 = rng() * Math.PI * 2;
-  const k1 = (Math.PI * 2) / STREAM_WAVELENGTH;
-  // Non-integer ratio so the two waves never line up into a repeating pattern.
-  const k2 = k1 * 2.3;
+/** Half-width of the stream at `p` out to the edge of its bank. */
+export function streamOuterHalfWidth(p: StreamPoint): number {
+  return p.width / 2 + STREAM_BANK_WIDTH;
+}
 
-  const points: Vec2[] = [];
-  for (let x = bounds.minX; x <= bounds.maxX + STREAM_SAMPLE_STEP; x += STREAM_SAMPLE_STEP) {
-    const y =
-      baseY +
-      STREAM_AMPLITUDE * Math.sin(k1 * x + phase1) +
-      STREAM_AMPLITUDE * STREAM_SECONDARY_RATIO * Math.sin(k2 * x + phase2);
-    points.push({ x, y });
+/**
+ * Stream centreline across the full map width. We walk along the river and
+ * steer its *direction* with smooth 1D noise (two octaves: long sweeping
+ * bends plus smaller wiggles), gently pulled back towards the base line so
+ * it can't wander off. Unlike a sine, the bends come out uneven — long
+ * straight-ish reaches, lazy curves and the odd tight loop — like a real
+ * river seen from the air.
+ *
+ * The line comes back centred on y = 0; `placeStream` moves it into
+ * position. Seeds come from `rng`, so a seeded rng gives the same river.
+ */
+export function streamCenterline(world: WorldSize, rng: Rng): StreamPoint[] {
+  const bounds = mapBounds(world);
+  const bendSeed = Math.floor(rng() * 2 ** 31);
+  const wiggleSeed = Math.floor(rng() * 2 ** 31);
+  const widthSeed = Math.floor(rng() * 2 ** 31);
+
+  const step = STREAM_SAMPLE_STEP;
+  // Signed noise in roughly [-1, 1]. Value noise bunches around its middle,
+  // so it's stretched ×1.8 and clamped to reach full-strength bends.
+  const signed = (v: number) => Math.max(-1, Math.min(1, (v * 2 - 1) * 1.8));
+
+  const points: StreamPoint[] = [];
+  let x = bounds.minX - step;
+  let y = 0;
+  // Iteration cap is just a safety net; x always advances (|angle| < 90°).
+  for (let s = 0; x <= bounds.maxX + step && points.length < 100_000; s += step) {
+    const sweep = signed(valueNoise(s / (STREAM_WAVELENGTH / 2), 0.5, bendSeed));
+    const wiggle = signed(valueNoise(s / (STREAM_WAVELENGTH / 7), 0.5, wiggleSeed));
+    const pull = STREAM_PULL * Math.max(-1, Math.min(1, -y / STREAM_PULL_RANGE));
+    const angle = Math.max(
+      -STREAM_MAX_ANGLE,
+      Math.min(STREAM_MAX_ANGLE, STREAM_MEANDER_ANGLE * (0.8 * sweep + 0.2 * wiggle) + pull),
+    );
+
+    const widthNoise = valueNoise(s / 40, 0.5, widthSeed) * 2 - 1;
+    points.push({ x, y, width: STREAM_WIDTH * (1 + STREAM_WIDTH_VARIATION * widthNoise) });
+
+    x += Math.cos(angle) * step;
+    y += Math.sin(angle) * step;
   }
+
   return points;
+}
+
+/**
+ * Move a centred stream (see `streamCenterline`) to its base line, shifted
+ * up or down by the smallest amount that keeps every bank at least
+ * `STREAM_AIRFIELD_CLEARANCE` from every airfield (runway, taxiway, hangars).
+ */
+export function placeStream(
+  line: readonly StreamPoint[],
+  world: WorldSize,
+  runways: readonly Runway[],
+): StreamPoint[] {
+  const baseY = world.height * STREAM_BASE_FY;
+  const clearAt = (y0: number) =>
+    line.every((p) => {
+      const q = { x: p.x, y: p.y + y0 };
+      const reach = streamOuterHalfWidth(p) + STREAM_AIRFIELD_CLEARANCE;
+      return runways.every((r) => distanceToRunway(q, r.airfield.footprint) >= reach);
+    });
+
+  // Try 0, -1, +1, -2, +2, … so the river ends up as near its line as allowed.
+  let offset = baseY;
+  for (let d = 0; d <= STREAM_MAX_SHIFT; d++) {
+    const candidate = clearAt(baseY - d) ? baseY - d : clearAt(baseY + d) ? baseY + d : null;
+    if (candidate !== null) {
+      offset = candidate;
+      break;
+    }
+  }
+  return line.map((p) => ({ ...p, y: p.y + offset }));
+}
+
+/**
+ * Distance from `p` to the stream's outer bank (negative when on the bank or
+ * in the water). Conservative: uses the wider bank of each segment.
+ */
+export function distanceToStreamBank(p: Vec2, stream: readonly StreamPoint[]): number {
+  let best = Infinity;
+  for (let i = 1; i < stream.length; i++) {
+    const a = stream[i - 1]!;
+    const b = stream[i]!;
+    const reach = Math.max(streamOuterHalfWidth(a), streamOuterHalfWidth(b));
+    best = Math.min(best, distanceToSegment(p, a, b) - reach);
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,14 +309,20 @@ export function treeDensity(p: Vec2, world: WorldSize): number {
 export function scatterTrees(
   world: WorldSize,
   runways: readonly Runway[],
-  stream: readonly Vec2[],
+  stream: readonly StreamPoint[],
   rng: Rng,
 ): Tree[] {
   const b = mapBounds(world);
   const area = (b.maxX - b.minX) * (b.maxY - b.minY);
   const candidates = Math.round((area / 1000) * TREE_DENSITY);
-  const streamClearance = STREAM_WIDTH / 2 + TREE_STREAM_CLEARANCE;
-  const baseY = world.height * STREAM_BASE_FY;
+  // The band of y the river and its banks can touch, for a cheap pre-test.
+  let bandMin = Infinity;
+  let bandMax = -Infinity;
+  for (const p of stream) {
+    const reach = streamOuterHalfWidth(p) + TREE_STREAM_CLEARANCE;
+    bandMin = Math.min(bandMin, p.y - reach);
+    bandMax = Math.max(bandMax, p.y + reach);
+  }
 
   const trees: Tree[] = [];
   for (let i = 0; i < candidates; i++) {
@@ -250,11 +340,11 @@ export function scatterTrees(
     if (runways.some((r) => distanceToRunway(pos, r.airfield.footprint) < TREE_RUNWAY_CLEARANCE)) {
       continue;
     }
-    // Cheap band test first: the stream never strays further than
-    // STREAM_MAX_OFFSET from its base line, so most points skip the polyline.
+    // Cheap band test first, so most points skip the full polyline check.
     if (
-      Math.abs(pos.y - baseY) < STREAM_MAX_OFFSET + streamClearance &&
-      distanceToPolyline(pos, stream) < streamClearance
+      pos.y > bandMin &&
+      pos.y < bandMax &&
+      distanceToStreamBank(pos, stream) < TREE_STREAM_CLEARANCE
     ) {
       continue;
     }
@@ -269,10 +359,13 @@ export function scatterTrees(
 // Entry point
 // ---------------------------------------------------------------------------
 
-/** Full scenery layout for a world size. Deterministic (fixed seed). */
+/**
+ * Full scenery layout for a world size and runway layout. Deterministic
+ * (fixed seed); the runways only move the river and clear the trees.
+ */
 export function buildScenery(world: WorldSize, runways: readonly Runway[]): Scenery {
   const rng = mulberry32(SCENERY_SEED);
-  const stream = streamCenterline(world, rng);
+  const stream = placeStream(streamCenterline(world, rng), world, runways);
   const trees = scatterTrees(world, runways, stream, rng);
   return { bounds: mapBounds(world), stream, trees };
 }

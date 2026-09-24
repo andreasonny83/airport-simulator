@@ -5,7 +5,8 @@
  * Tuning loop: runway markings/lights live in runway.ts, taxiways and
  * hangars in airfield.ts, the layout and sizes in config.ts (RUNWAY_*,
  * TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, MAP_SCALE), colours in
- * landscape.ts. Save and the story rebuilds.
+ * landscape.ts. Save and the story rebuilds. Boats have their own stories
+ * in "Scene/River".
  */
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Meta, StoryObj } from "@storybook/html-vite";
@@ -131,7 +132,10 @@ export const RunwayLayout: StoryObj<AirfieldArgs> = {
     }),
 };
 
-/** The full decorative landscape (grass, stream, trees) with the airfield. */
+/**
+ * The full decorative landscape (grass, meandering stream placed clear of
+ * the airfields, trees, passing boats) with the airfield.
+ */
 export const FullLandscape: StoryObj<AirfieldArgs> = {
   argTypes: fieldArgTypes,
   args: { rotationDeg: 0, zoom: 1, showBoundary: true },

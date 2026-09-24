@@ -1,6 +1,6 @@
 /**
- * Low-poly daytime landscape: faceted grass, a stream with sandy banks,
- * and thin-instanced trees.
+ * Low-poly daytime landscape: faceted grass, a stream with sandy banks and
+ * the odd boat sailing along it, and thin-instanced trees.
  *
  * The layout comes from the pure `core/scenery.ts`; this file only turns it
  * into meshes. The ground stays perfectly flat at y = 0 — input intersects
@@ -18,10 +18,19 @@ import { CreateRibbon } from "@babylonjs/core/Meshes/Builders/ribbonBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import "@babylonjs/core/Meshes/thinInstanceMesh"; // side effect: mesh.thinInstance* API
 import type { Scene } from "@babylonjs/core/scene";
-import { SCENERY_SEED, STREAM_WIDTH } from "../config";
+import { SCENERY_SEED, STREAM_BANK_WIDTH } from "../config";
+import { createBoatTraffic, stepBoats, type BoatTraffic } from "../core/boats";
 import { lerp, mulberry32 } from "../core/math";
-import { buildScenery, valueNoise, type Scenery, type Tree, type TreeKind } from "../core/scenery";
+import {
+  buildScenery,
+  valueNoise,
+  type Scenery,
+  type StreamPoint,
+  type Tree,
+  type TreeKind,
+} from "../core/scenery";
 import type { Runway, Vec2, WorldSize } from "../core/types";
+import { BoatFleet } from "./boats";
 import { fromScene, toScene } from "./coords";
 import { CLEAR_COLOR } from "./scene";
 
@@ -49,8 +58,6 @@ interface TreeModel {
   canopy: Mesh;
 }
 
-/** Bank is this much wider than the water on each side. */
-const BANK_MARGIN = 1.2;
 /** Heights above the grass: bank under water, both under the runways (0.05+). */
 const BANK_Y = 0.02;
 const WATER_Y = 0.04;
@@ -61,6 +68,13 @@ const WATER_EMISSIVE = new Color3(0.05, 0.14, 0.22);
 export class Landscape {
   /** Everything built by `setWorld`, disposed on the next rebuild. */
   private meshes: Mesh[] = [];
+
+  /** Boats on the river (rebuilt with it) and their meshes. */
+  private traffic: BoatTraffic | null = null;
+  private world: WorldSize | null = null;
+  private readonly fleet: BoatFleet;
+  /** `time` of the previous `update`, to step the boats by the difference. */
+  private lastTime: number | null = null;
 
   private readonly grassMat: StandardMaterial;
   private readonly bankMat: StandardMaterial;
@@ -85,6 +99,8 @@ export class Landscape {
     this.waterMat.specularPower = 48;
     this.waterMat.emissiveColor = WATER_EMISSIVE.clone();
     this.waterMat.alpha = 0.9;
+
+    this.fleet = new BoatFleet(scene, shadows);
   }
 
   /** (Re)build all scenery for a world size and runway layout. */
@@ -99,12 +115,28 @@ export class Landscape {
       ...this.buildTrees(scenery.trees, world),
     );
     for (const mesh of this.meshes) mesh.isPickable = false;
+
+    // New river, new traffic: boats restart empty and set off again soon.
+    this.fleet.clear();
+    this.traffic = createBoatTraffic(scenery.stream, world);
+    this.world = world;
   }
 
-  /** Per-frame animation (water shimmer). `time` is in seconds. */
+  /**
+   * Per-frame animation (water shimmer, boats). `time` is in seconds and
+   * stands still while the game is paused, so the boats stop too.
+   */
   update(time: number): void {
     const pulse = 1 + 0.35 * Math.sin(time * 1.3) * Math.sin(time * 0.7 + 1);
     WATER_EMISSIVE.scaleToRef(pulse, this.waterMat.emissiveColor);
+
+    // Clamped like the sim's dt, so a long frame can't teleport a boat.
+    const dt = this.lastTime === null ? 0 : Math.min(0.1, Math.max(0, time - this.lastTime));
+    this.lastTime = time;
+    if (this.traffic && this.world) {
+      stepBoats(this.traffic, dt);
+      this.fleet.sync(this.traffic, this.world, time);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -167,27 +199,27 @@ export class Landscape {
   // -------------------------------------------------------------------------
 
   /** Water ribbon over a wider bank ribbon, both following the centreline. */
-  private buildStream(line: readonly Vec2[], world: WorldSize): Mesh[] {
-    const bank = this.ribbon("bank", line, world, STREAM_WIDTH / 2 + BANK_MARGIN, BANK_Y);
+  private buildStream(line: readonly StreamPoint[], world: WorldSize): Mesh[] {
+    const bank = this.ribbon("bank", line, world, (p) => p.width / 2 + STREAM_BANK_WIDTH, BANK_Y);
     bank.material = this.bankMat;
     bank.receiveShadows = true;
 
-    const water = this.ribbon("water", line, world, STREAM_WIDTH / 2, WATER_Y);
+    const water = this.ribbon("water", line, world, (p) => p.width / 2, WATER_Y);
     water.material = this.waterMat;
     water.receiveShadows = true;
     return [bank, water];
   }
 
   /**
-   * A flat strip of `halfWidth` either side of `line`, offset along each
-   * point's normal. The tangent at a point uses its neighbours (central
+   * A flat strip `halfWidth(p)` either side of `line` (the river's width
+   * varies along it), offset along each point's normal. The tangent at a point uses its neighbours (central
    * difference) so the strip bends smoothly.
    */
   private ribbon(
     name: string,
-    line: readonly Vec2[],
+    line: readonly StreamPoint[],
     world: WorldSize,
-    halfWidth: number,
+    halfWidth: (p: StreamPoint) => number,
     y: number,
   ): Mesh {
     const left: Vector3[] = [];
@@ -201,8 +233,9 @@ export class Landscape {
       const nx = -ty / len;
       const ny = tx / len;
       const p = line[i]!;
-      left.push(toScene({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth }, world, y));
-      right.push(toScene({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth }, world, y));
+      const hw = halfWidth(p);
+      left.push(toScene({ x: p.x + nx * hw, y: p.y + ny * hw }, world, y));
+      right.push(toScene({ x: p.x - nx * hw, y: p.y - ny * hw }, world, y));
     }
     // DOUBLESIDE so we don't have to care which way the ribbon winds.
     return CreateRibbon(

@@ -18,7 +18,7 @@ This project is an Air Traffic Control game, inspired by classic mobile games li
   - `src/main.ts` — wiring and the render loop.
   - Sim `(x, y)` maps to Babylon `(x, z)` via `src/render/coords.ts`.
 - **Scripts:** `dev`, `build`, `preview`, `storybook`, `build-storybook`, `test`, `typecheck`, `lint`, `format`.
-- **Storybook:** (`@storybook/html-vite`) showcases every UI element for tuning. HUD stories live in `src/ui/*.stories.ts`, Babylon stories in `src/render/stories/` (shared stage in `stage.ts`). HUD markup lives in `src/ui/hudMarkup.ts` (injected by `createHud`), so game and stories share one source. Edit a constant and the open story hot-reloads. Flight animation (banking, wing flex, props, lights, wind) lives in `src/render/flightTuning.ts` as named presets; the game plays `ACTIVE_PRESET`, and the "Tuning/Flight" stories edit values live and emit a preset snippet to paste back.
+- **Storybook:** (`@storybook/html-vite`) showcases every UI element for tuning. HUD stories live in `src/ui/*.stories.ts`, Babylon stories in `src/render/stories/` (shared stage in `stage.ts`). HUD markup lives in `src/ui/hudMarkup.ts` (injected by `createHud`), so game and stories share one source. Edit a constant and the open story hot-reloads. Flight animation (banking, wing flex, props, lights, wind) lives in `src/render/flightTuning.ts` as named presets; the game plays `ACTIVE_PRESET`, and the "Tuning/Flight" stories edit values live and emit a preset snippet to paste back. The "Scene/River" stories cover the river boats (`render/boats.ts`, traffic in `core/boats.ts`).
 - `sample.html` is the original single-file 2D prototype, kept as a reference only (not built).
 
 ## Game Design & Inspiration
@@ -46,3 +46,4 @@ I'm looking to build something similar, the most direct route today is using Pha
 
 - Generate clean, heavily commented code.
 - Ensure all game loop updates are delta-time (dt) dependent so the game runs at the same speed regardless of monitor refresh rate.
+- **Keep Storybook in sync — at the end of every task:** review whether the change touched anything Storybook shows (HUD markup, meshes, models, landscape, animation, config constants a story reads or documents). If so, update the affected stories (or add a new story for a new visual element), refresh story doc comments that name changed constants/files, then verify: `npm run typecheck`, and render every story (Storybook dev server, `iframe.html?id=<story-id>`) checking for console/page errors. Mention the Storybook updates in the task summary.

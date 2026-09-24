@@ -301,25 +301,36 @@ export const MAP_SCALE = 5;
 /** Fixed seed: the stream and trees look the same on every load and resize. */
 export const SCENERY_SEED = 0x5eed_a1e;
 
-/** Width of the water surface (world units). */
+/** Average width of the water surface (world units). */
 export const STREAM_WIDTH = 7;
 
-/**
- * Peak deviation of the main meander from the base line. The centreline adds
- * a second, smaller sine (40% of this), so the total swing is ±1.4×.
- */
-export const STREAM_AMPLITUDE = 4.5;
-
-/** Wavelength of the main meander (world units). */
-export const STREAM_WAVELENGTH = 60;
+/** Water width wanders ±this fraction around `STREAM_WIDTH` along the river. */
+export const STREAM_WIDTH_VARIATION = 0.15;
 
 /**
- * Base line of the stream as a fraction of the world height. 0.5 threads it
- * between the yellow runway (fy 0.3) and the red/blue pair (fy 0.72); -0.08
- * runs it along the top of the field, just clear of the yellow runway's
- * hangars (their backs sit ~21 units north of the strip).
+ * Peak angle (radians) between the river's flow and its general direction.
+ * The direction is steered by smooth noise, so most of the river swings
+ * less than this; ~0.6 gives lazy curves, past ~1.3 bends loop back.
  */
-export const STREAM_BASE_FY = -0.08;
+export const STREAM_MEANDER_ANGLE = 1.1;
+
+/** Typical river length of one meander (two opposite bends). */
+export const STREAM_WAVELENGTH = 90;
+
+/**
+ * Preferred base line of the stream as a fraction of the world height:
+ * 0.05 is just inside the top of the field. `placeStream` then pushes the
+ * river away from it only as far as `STREAM_AIRFIELD_CLEARANCE` requires,
+ * so it ends up skirting the yellow airfield (0.5 would thread it between
+ * the yellow runway and the red/blue pair, if there's room).
+ */
+export const STREAM_BASE_FY = 0.05;
+
+/** Minimum gap between the river's outer bank and any airfield footprint. */
+export const STREAM_AIRFIELD_CLEARANCE = 6;
+
+/** Sandy bank either side of the water, beyond the water's edge. */
+export const STREAM_BANK_WIDTH = 1.2;
 
 /** Candidate trees per 1000 units² (before rejection / density thinning). */
 export const TREE_DENSITY = 0.8;
@@ -327,8 +338,8 @@ export const TREE_DENSITY = 0.8;
 /** No tree closer than this to any runway edge, taxiway or hangar. */
 export const TREE_RUNWAY_CLEARANCE = 8;
 
-/** No tree closer than this to the stream's water edge (≥ canopy radius). */
-export const TREE_STREAM_CLEARANCE = 3;
+/** No tree closer than this to the stream's outer bank (≥ canopy radius). */
+export const TREE_STREAM_CLEARANCE = 3.5;
 
 /**
  * Tree size range. A scale-1 tree is ~3.5 units tall and ~2.5 wide (so up
@@ -342,6 +353,36 @@ export const TREE_SCALE_MAX = 2.5;
 
 /** Fraction of trees that are conifers; the rest are broadleaf. */
 export const TREE_CONIFER_SHARE = 0.35;
+
+// ---------------------------------------------------------------------------
+// River boats (decorative, see core/boats.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per boat type: cruising `speed` (units / second; planes fly at 7) and
+ * `lane`, the sideways offset from the river's centre as a fraction of its
+ * half-width. Different lanes let a fast motorboat overtake a sailboat.
+ */
+export const BOAT_TYPES = {
+  sailboat: { speed: 1.8, lane: 0.3 },
+  motorboat: { speed: 3.4, lane: 0.55 },
+} as const;
+
+/** Seconds between boat launches, picked at random in this range. */
+export const BOAT_SPAWN_MIN = 8;
+export const BOAT_SPAWN_MAX = 18;
+
+/** Most boats on the river at once. */
+export const BOAT_MAX = 3;
+
+/**
+ * Boats sail the river from this far (× world height) off one side of the
+ * playfield to the same distance off the other.
+ */
+export const BOAT_ROUTE_MARGIN = 0.4;
+
+/** Boats fade in/out over this distance at either end of their route. */
+export const BOAT_FADE_DISTANCE = 8;
 
 // ---------------------------------------------------------------------------
 // Camera buttons
