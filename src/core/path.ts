@@ -2,8 +2,9 @@
  * Player-drawn flight paths.
  */
 import { ANCHOR_RADIUS, LANDING_ANGLE_TOLERANCE, PATH_MIN_SPACING } from "../config";
+import { airspaceBounds, isInAirspace } from "./layout";
 import { angleDelta, distance } from "./math";
-import type { Plane, Runway, Vec2 } from "./types";
+import type { Plane, Runway, Vec2, WorldSize } from "./types";
 
 /** Begin drawing a new path for `plane`, discarding the old one. */
 export function startPath(plane: Plane): void {
@@ -32,6 +33,40 @@ export function appendPathPoint(
   plane.path.push({ x: point.x, y: point.y });
   plane.pathVersion++;
   return true;
+}
+
+/**
+ * Keep drawn paths inside the airspace (see `airspaceBounds`). Paths can't
+ * go past its edge: a plane
+ * is sent off the world by drawing up to the border, and it then flies on
+ * straight (see `departing` in core/plane.ts).
+ *
+ * Looks at the segment from the path's current end (or the plane itself)
+ * to the pointer's `point`:
+ * - `point` inside the airspace: returned unchanged;
+ * - the segment leaves the airspace: the point where it crosses the border, so
+ *   the line ends exactly on the edge. Further drags outside clip to that
+ *   same point, which `appendPathPoint`'s spacing check then drops;
+ * - both ends outside (e.g. a plane that has only just spawned): null.
+ *
+ * Once the pointer comes back inside, drawing carries on from the border.
+ */
+export function clampPathPoint(plane: Plane, point: Vec2, world: WorldSize): Vec2 | null {
+  if (isInAirspace(point, world)) return { x: point.x, y: point.y };
+  const from = plane.path[plane.path.length - 1] ?? plane.pos;
+  if (!isInAirspace(from, world)) return null;
+
+  // Walk from `from` towards `point` and stop at the first border hit: the
+  // smallest fraction t at which x or y reaches its limit.
+  const b = airspaceBounds(world);
+  const dx = point.x - from.x;
+  const dy = point.y - from.y;
+  let t = 1;
+  if (dx > 0) t = Math.min(t, (b.maxX - from.x) / dx);
+  if (dx < 0) t = Math.min(t, (b.minX - from.x) / dx);
+  if (dy > 0) t = Math.min(t, (b.maxY - from.y) / dy);
+  if (dy < 0) t = Math.min(t, (b.minY - from.y) / dy);
+  return { x: from.x + dx * t, y: from.y + dy * t };
 }
 
 /**

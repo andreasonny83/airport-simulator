@@ -6,6 +6,7 @@
  * many short ones trace the same curve.
  */
 import {
+  EXIT_LOOKAHEAD,
   FLIGHT_SUBSTEP,
   LANDING_ROLL_DISTANCE,
   LANDING_SPEED_END,
@@ -18,6 +19,8 @@ import {
   WAYPOINT_CAPTURE_RADIUS,
 } from "../config";
 import { angleDelta, distance, lerp, normalizeAngle } from "./math";
+import { airspaceBounds, isInAirspace } from "./layout";
+import { mapBounds } from "./scenery";
 import type { Plane, RunwayColor, Vec2, WorldSize } from "./types";
 
 export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: number): Plane {
@@ -33,6 +36,7 @@ export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: 
     landingProgress: 0,
     warning: false,
     pathAnchored: false,
+    canDepart: true,
   };
 }
 
@@ -40,6 +44,10 @@ export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: 
 export function updatePlane(plane: Plane, dt: number, world: WorldSize): void {
   switch (plane.phase) {
     case "landed":
+    case "departed":
+      return;
+    case "departing":
+      updateDeparting(plane, dt, world);
       return;
     case "landing":
       updateLanding(plane, dt);
@@ -69,9 +77,53 @@ function updateFlying(plane: Plane, dt: number, world: WorldSize): void {
   const steps = Math.max(1, Math.ceil(dt / FLIGHT_SUBSTEP));
   const h = dt / steps;
   for (let i = 0; i < steps; i++) {
+    // An anchored path ends on a runway: that plane is landing, not leaving.
+    const hadFreePath = plane.path.length > 0 && !plane.pathAnchored;
     const desired = desiredHeading(plane, world);
+    // The path just ran out with the plane pointing off the field: the
+    // player sent it away, so let it go rather than U-turning it back.
+    // Planes that may not depart fall through and U-turn as usual.
+    if (plane.canDepart && hadFreePath && plane.path.length === 0 && isHeadingOut(plane, world)) {
+      plane.phase = "departing";
+      updateDeparting(plane, dt - i * h, world);
+      return;
+    }
     steer(plane, desired ?? plane.heading, h);
     moveForward(plane, PLANE_SPEED * h);
+  }
+}
+
+/**
+ * True if flying straight on for `EXIT_LOOKAHEAD` units would take the plane
+ * off the field. Lenient on purpose: the player only has to aim at the edge,
+ * not drag all the way past it.
+ */
+function isHeadingOut(plane: Plane, world: WorldSize): boolean {
+  const ahead = {
+    x: plane.pos.x + Math.cos(plane.heading) * EXIT_LOOKAHEAD,
+    y: plane.pos.y + Math.sin(plane.heading) * EXIT_LOOKAHEAD,
+  };
+  return !isInAirspace(ahead, world);
+}
+
+/**
+ * Fly a departing plane straight out of the world. Any leftover bank rolls
+ * out smoothly (steering towards its own heading). It stays fully visible
+ * and is only removed once it has cleared the scenery map: the map is sized
+ * to fill the view at the lowest zoom, so by then it is off-screen.
+ */
+function updateDeparting(plane: Plane, dt: number, world: WorldSize): void {
+  const steps = Math.max(1, Math.ceil(dt / FLIGHT_SUBSTEP));
+  const h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    steer(plane, plane.heading, h);
+    moveForward(plane, PLANE_SPEED * h);
+  }
+  const b = mapBounds(world);
+  const m = PLANE_RADIUS;
+  const { x, y } = plane.pos;
+  if (x < b.minX - m || x > b.maxX + m || y < b.minY - m || y > b.maxY + m) {
+    plane.phase = "departed";
   }
 }
 
@@ -80,17 +132,18 @@ function updateFlying(plane: Plane, dt: number, world: WorldSize): void {
  * straight".
  *
  * - With a path: aim at the next waypoint that is still worth chasing.
- * - Without one: if the plane has drifted off the field, head back towards
- *   the middle. This replaces the old instant mirror at the edge with a
- *   smooth U-turn.
+ * - Without one: if the plane has drifted off the field on its own, head
+ *   back towards the middle with a smooth U-turn. (Planes the player steers
+ *   out never get here: they switch to `departing`, see `updateFlying`.)
  */
 function desiredHeading(plane: Plane, world: WorldSize): number | null {
   const target = nextWaypoint(plane);
   if (target) return Math.atan2(target.y - plane.pos.y, target.x - plane.pos.x);
 
+  const b = airspaceBounds(world);
   const m = PLANE_RADIUS;
   const { x, y } = plane.pos;
-  if (x < -m || x > world.width + m || y < -m || y > world.height + m) {
+  if (x < b.minX - m || x > b.maxX + m || y < b.minY - m || y > b.maxY + m) {
     return Math.atan2(world.height / 2 - y, world.width / 2 - x);
   }
   return null;

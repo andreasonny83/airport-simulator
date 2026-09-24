@@ -12,15 +12,12 @@ import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { FLIGHT_ALTITUDE } from "../config";
+import { CAMERA_TILT } from "../config";
+import { viewHalfHeight } from "../core/layout";
 import type { WorldSize } from "../core/types";
 
-/** Tilt from straight-down (radians). 0 = top-down radar view; 0.9 ≈ 52°. */
-const TILT = 0.9;
 /** Distance from target; with ortho it only needs to clear the scene. */
 const CAMERA_RADIUS = 400;
-/** Extra margin around the playfield when fitting the view. */
-const FIT_PADDING = 1.04;
 /** Lowest zoom shows ~2× the playfield; the landscape map is sized to cover it. */
 const ZOOM_MIN = 0.45;
 const ZOOM_MAX = 2.5;
@@ -42,7 +39,7 @@ export class CameraController {
     this.camera = new ArcRotateCamera(
       "camera",
       -Math.PI / 2,
-      TILT,
+      CAMERA_TILT,
       CAMERA_RADIUS,
       Vector3.Zero(),
       scene,
@@ -51,8 +48,8 @@ export class CameraController {
     this.camera.minZ = 1;
     this.camera.maxZ = CAMERA_RADIUS * 2;
     // Lock the tilt: rotation only ever changes alpha, never beta.
-    this.camera.lowerBetaLimit = TILT;
-    this.camera.upperBetaLimit = TILT;
+    this.camera.lowerBetaLimit = CAMERA_TILT;
+    this.camera.upperBetaLimit = CAMERA_TILT;
     this.targetAlpha = this.camera.alpha;
 
     // Mouse wheel zoom. passive:false so we can stop the page from scrolling.
@@ -96,20 +93,14 @@ export class CameraController {
    *
    * Fitting the field's rectangle at the current alpha would make the frustum
    * grow and shrink mid-spin (the rotated rectangle's screen bounding box
-   * changes with heading), which reads as an unwanted zoom. Instead we fit the
-   * field's bounding circle, which projects identically at any alpha:
-   * - screen X: a ground point `r` from the centre spans at most ±r;
-   * - screen Y: ground distance is foreshortened by cos(tilt), and altitude
-   *   adds up to FLIGHT_ALTITUDE · sin(tilt).
-   * Alpha therefore never appears here: only tilt, world size, aspect, zoom.
+   * changes with heading), which reads as an unwanted zoom. Instead
+   * `viewHalfHeight` fits the field's bounding circle, which projects
+   * identically at any alpha. The sim sizes the airspace from the same
+   * function, so the dashed edge lines up with this view.
    */
   private fit(aspect: number): void {
-    const r = Math.hypot(this.world.width / 2, this.world.height / 2);
-    const maxX = r;
-    const maxY = r * Math.cos(TILT) + FLIGHT_ALTITUDE * Math.sin(TILT);
-
     const safeAspect = aspect > 0 ? aspect : 1;
-    const halfH = (Math.max(maxY, maxX / safeAspect) * FIT_PADDING) / this.zoom;
+    const halfH = viewHalfHeight(this.world, safeAspect) / this.zoom;
     const halfW = halfH * safeAspect;
     this.camera.orthoTop = halfH;
     this.camera.orthoBottom = -halfH;

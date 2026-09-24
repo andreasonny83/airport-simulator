@@ -26,8 +26,11 @@ export type RunwayColor = "red" | "blue" | "yellow";
  * - `flying`  : airborne, follows its path, can collide.
  * - `landing` : touched down, rolling along the runway and fading out.
  * - `landed`  : finished; pruned from state at the end of the step.
+ * - `departing`: sent off the field by the player; flies straight on out of
+ *               view, no longer steerable and can't collide.
+ * - `departed` : past the scenery map edge; pruned like `landed`, no score.
  */
-export type PlanePhase = "flying" | "landing" | "landed";
+export type PlanePhase = "flying" | "landing" | "landed" | "departing" | "departed";
 
 /**
  * Top-level game phase, drives which overlay the UI shows. `step` only
@@ -72,6 +75,11 @@ export interface Plane {
    * threshold, and further drag points are ignored until a new path starts.
    */
   pathAnchored: boolean;
+  /**
+   * Whether the player may send this plane off the world (see `departing`).
+   * False for a shift's opening plane, which must be landed.
+   */
+  canDepart: boolean;
 }
 
 export interface Runway {

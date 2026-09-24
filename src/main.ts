@@ -56,7 +56,16 @@ const hud = createHud({
   onZoom: (dir) => cameraController.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
 });
 
-attachPointerInput(canvas, scene, cameraController.camera, () => state);
+attachPointerInput(canvas, scene, cameraController.camera, () => state, {
+  // Paths can't be drawn past the edge: show the border and say why.
+  onEdgeHover: (active) => sceneSync.setEdgeHighlight(active),
+  onEdgeBlocked: (plane) =>
+    hud.showToast(
+      plane.canDepart
+        ? "Paths end at the edge — plane will fly off"
+        : "Land this one — it can't leave",
+    ),
+});
 
 // Keyboard shortcut: P or Esc toggles pause.
 window.addEventListener("keydown", (e) => {

@@ -8,19 +8,25 @@
  *             swells and fades with gusts, as if the plane gets pushed about;
  *   - crab:   a slight yaw into the crosswind, like a real pilot holding a
  *             track in a side wind;
- *   - bumps:  a little roll/pitch jitter from turbulence.
+ *   - bumps:  roll/pitch wobble and a little up/down bob from turbulence
+ *             (the bob also shows in the plane's ground shadow).
  *
- * All effects are kept small so the plane still sits over its path line
- * and under the player's finger.
+ * Effects are tuned to read clearly at game zoom (1 world unit is roughly
+ * 9 px at 720p) while staying well inside the plane's grab radius, so the
+ * plane still sits near its path line and under the player's finger.
  */
 import type { Vec2 } from "../core/types";
 
-/** Largest drift offset from the true position (world units). */
-const DRIFT_AMPLITUDE = 0.45;
-/** Largest crab angle into a full-strength crosswind (radians, ~6°). */
+/** Largest drift offset along the wind (world units, about half a plane length). */
+const DRIFT_AMPLITUDE = 0.1;
+/** Largest sideways wander across the wind, as a fraction of the drift. */
+const WANDER_SHARE = 0.1;
+/** Largest crab angle into a full-strength crosswind (radians, ~10°). */
 const MAX_CRAB = 0.1;
-/** Largest turbulence roll/pitch wobble (radians, ~2°). */
-const BUMP_AMPLITUDE = 0.035;
+/** Largest turbulence roll wobble (radians, ~8°); pitch uses half. */
+const BUMP_AMPLITUDE = 0.1;
+/** Largest altitude bob (scene units). */
+const LIFT_AMPLITUDE = 0.1;
 /** Prevailing wind direction (sim radians) and how far it slowly veers. */
 const BASE_DIRECTION = Math.PI * 0.15;
 const VEER = 0.5;
@@ -35,6 +41,8 @@ export interface WindEffect {
   roll: number;
   /** Extra pitch (radians). */
   pitch: number;
+  /** Extra altitude (scene units): up and down bumps. */
+  lift: number;
 }
 
 /**
@@ -42,11 +50,22 @@ export interface WindEffect {
  *
  * `phase` is different for each plane, so they don't all bob in sync.
  *
- * TODO(you): shape the feel of the turbulence here. The current version is
- * one smooth sine: steady, regular swaying.
+ * Two ingredients:
+ * - sway: three sines at unrelated frequencies. The sum never quite repeats,
+ *   so it reads as restless air rather than a metronome.
+ * - gusts: a high odd power of a slow sine. It stays near 0 most of the time
+ *   and spikes briefly around its peaks, giving an occasional hard shove.
+ *   The odd power keeps the sign, so gusts push both ways.
+ *
+ * `tanh` softly limits the total to (-1, 1) without clipping the peaks flat.
  */
 export function turbulence(time: number, phase: number): number {
-  return Math.sin(time * 0.9 + phase);
+  const sway =
+    0.55 * Math.sin(time * 0.7 + phase) +
+    0.3 * Math.sin(time * 1.9 + phase * 1.7) +
+    0.15 * Math.sin(time * 4.3 + phase * 2.9);
+  const gust = Math.sin(time * 0.31 + phase * 0.5) ** 9;
+  return Math.tanh(sway * 1.1 + gust * 0.9);
 }
 
 /**
@@ -80,6 +99,9 @@ export function windEffect(
   // A second, faster signal for the bumps, so drift and wobble don't move
   // in lockstep.
   const chop = turbulence(time * 2.7, phase * 1.7 + 4.1) * strength * exposure;
+  // A third signal for side-to-side wander, so the drift traces a loose 2D
+  // wobble instead of sliding back and forth along one line.
+  const wander = turbulence(time * 1.3, phase * 0.6 + 2.2) * strength * exposure;
 
   // Crosswind component: sin(wind - heading) is +1 when the wind blows from
   // the plane's left towards its right. The nose turns into the wind (the
@@ -88,11 +110,14 @@ export function windEffect(
 
   return {
     drift: {
-      x: Math.cos(dir) * gust * DRIFT_AMPLITUDE,
-      y: Math.sin(dir) * gust * DRIFT_AMPLITUDE,
+      // Along the wind, plus a smaller push across it (perpendicular is
+      // (-sin, cos)).
+      x: (Math.cos(dir) * gust - Math.sin(dir) * wander * WANDER_SHARE) * DRIFT_AMPLITUDE,
+      y: (Math.sin(dir) * gust + Math.cos(dir) * wander * WANDER_SHARE) * DRIFT_AMPLITUDE,
     },
     crab: -crosswind * MAX_CRAB,
     roll: chop * BUMP_AMPLITUDE,
     pitch: gust * BUMP_AMPLITUDE * 0.5,
+    lift: chop * LIFT_AMPLITUDE,
   };
 }

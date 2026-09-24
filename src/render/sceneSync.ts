@@ -15,6 +15,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { COLOR_HEX, FLIGHT_ALTITUDE, MAX_BANK, MAX_TURN_RATE } from "../config";
 import { angleDelta, lerp, normalizeAngle } from "../core/math";
 import type { GameState, Plane, WorldSize } from "../core/types";
+import { AirspaceBoundary } from "./boundary";
 import { headingToRotationY, toScene } from "./coords";
 import { Landscape } from "./landscape";
 import type { MeshFactory } from "./meshes";
@@ -73,6 +74,7 @@ export class SceneSync {
   private runwayViews: RunwayView[] = [];
   private readonly landscape: Landscape;
   private readonly runwayFactory: RunwayFactory;
+  private readonly boundary: AirspaceBoundary;
   /** Camera view direction, refreshed every sync (see `placeOverTrack`). */
   private readonly viewDir = new Vector3(0, -1, 0);
   /** `time` of the previous sync, for frame-to-frame easing. */
@@ -85,6 +87,12 @@ export class SceneSync {
   ) {
     this.landscape = new Landscape(scene, shadows);
     this.runwayFactory = new RunwayFactory(scene, (color) => factory.material(color));
+    this.boundary = new AirspaceBoundary(scene);
+  }
+
+  /** Show the airspace border while a drag is pressing past it. */
+  setEdgeHighlight(active: boolean): void {
+    this.boundary.setActive(active);
   }
 
   /** Rebuild static geometry (landscape, runways) after a resize. */
@@ -93,6 +101,7 @@ export class SceneSync {
     this.landscape.setWorld(state.world, state.runways);
     for (const view of this.runwayViews) view.dispose();
     this.runwayViews = state.runways.map((r) => this.runwayFactory.create(r, state.world));
+    this.boundary.setWorld(state.world);
     // Path lines were built with the old world→scene mapping; force a rebuild.
     for (const view of this.views.values()) view.pathVersion = -1;
   }
@@ -105,6 +114,7 @@ export class SceneSync {
     // `time` stands still while paused, so the easing freezes along with it.
     const dt = this.lastTime === null ? 0 : Math.max(0, time - this.lastTime);
     this.lastTime = time;
+    this.boundary.update(dt);
     const alive = new Set<number>();
     for (const plane of state.planes) {
       alive.add(plane.id);
@@ -143,7 +153,7 @@ export class SceneSync {
     time: number,
     dt: number,
   ): void {
-    const landing = plane.phase !== "flying";
+    const landing = plane.phase === "landing" || plane.phase === "landed";
     const t = plane.landingProgress;
 
     // Altitude: cruise, then descend onto the runway during the first third
@@ -157,6 +167,7 @@ export class SceneSync {
     this.placeOverTrack(plane, world, altitude, view.mesh.position);
     view.mesh.position.x += wind.drift.x;
     view.mesh.position.z -= wind.drift.y; // sim +y is scene -z (see coords.ts)
+    view.mesh.position.y += wind.lift;
 
     // Yaw: heading plus crab into the wind, eased the short way round.
     const targetYaw = plane.heading + wind.crab;
@@ -174,11 +185,12 @@ export class SceneSync {
       headingToRotationY(view.yaw),
       wind.pitch,
     );
-    // Fade out over the second half of the rollout.
+    // Fade out over the second half of the rollout. Departing planes stay
+    // opaque: they simply fly out of view.
     view.mesh.visibility = landing ? 1 - Math.max(0, (t - 0.5) * 2) : 1;
 
     // Proximity warning ring, pulsing.
-    const warn = plane.warning && !landing;
+    const warn = plane.warning && plane.phase === "flying";
     view.ring.setEnabled(warn);
     if (warn) {
       this.placeOverTrack(plane, world, altitude, view.ring.position);

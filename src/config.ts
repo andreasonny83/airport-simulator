@@ -13,7 +13,25 @@ import type { RunwayColor } from "./core/types";
 // ---------------------------------------------------------------------------
 
 /** Fixed playfield height; width is `WORLD_HEIGHT * aspectRatio`. */
-export const WORLD_HEIGHT = 80;
+export const WORLD_HEIGHT = 100;
+
+/**
+ * Tilt of the camera from straight down (radians). 0 = top-down radar view;
+ * 0.9 ≈ 52°. Lives here (not in render/camera.ts) because the airspace is
+ * sized from the camera's default view (see core/layout.ts `airspaceBounds`).
+ */
+export const CAMERA_TILT = 0.9;
+
+/** Extra margin around the playfield's bounding circle when fitting the view. */
+export const CAMERA_FIT_PADDING = 1.04;
+
+/**
+ * The airspace (where planes fly and paths can be drawn) fills the default
+ * camera view, inset from every screen edge by this fraction of the view's
+ * half-height. The same fraction on all four sides keeps an even on-screen
+ * gap whatever the aspect ratio: ~12% ≈ 43 px on a 720 px tall window.
+ */
+export const AIRSPACE_SCREEN_INSET = 0.12;
 
 /** Minimum world width required before the third (yellow) runway is added. */
 export const YELLOW_RUNWAY_MIN_WIDTH = 75;
@@ -70,6 +88,13 @@ export const TURN_LAG = 0.15;
 
 /** A waypoint within this distance of the plane counts as reached. */
 export const WAYPOINT_CAPTURE_RADIUS = 1.5;
+
+/**
+ * When a drawn path runs out, look this far ahead along the heading: if that
+ * point is off the field, the player was steering the plane out of the world
+ * and it departs instead of turning back.
+ */
+export const EXIT_LOOKAHEAD = 8;
 
 /**
  * Fixed sub-step (seconds) for flight integration. Steering is a feedback

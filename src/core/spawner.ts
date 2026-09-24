@@ -2,6 +2,7 @@
  * Plane spawning and the difficulty curve.
  */
 import { PLANE_RADIUS, SPAWN_HEADING_JITTER, WARNING_DISTANCE } from "../config";
+import { airspaceBounds } from "./layout";
 import { distance } from "./math";
 import { createPlane } from "./plane";
 import { unlockedColors } from "./progression";
@@ -15,7 +16,7 @@ export interface SpawnSpec {
 
 /**
  * Pick a random colour, screen edge and inward heading for a new plane.
- * Planes appear just outside the field (one radius beyond the edge).
+ * Planes appear just outside the airspace (one radius beyond its edge).
  */
 export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng: Rng): SpawnSpec {
   const color = colors[Math.floor(rng() * colors.length)] ?? colors[0] ?? "red";
@@ -23,24 +24,31 @@ export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng:
   const along = rng();
   const jitter = (rng() - 0.5) * 2 * SPAWN_HEADING_JITTER;
   const r = PLANE_RADIUS;
+  // Enter across the airspace edge, but aimed at the runway field: `along`
+  // spans the field's side, not the (wider) airspace's.
+  const b = airspaceBounds(world);
 
   switch (edge) {
     case 0:
-      return { color, pos: { x: along * world.width, y: -r }, heading: Math.PI / 2 + jitter };
+      return {
+        color,
+        pos: { x: along * world.width, y: b.minY - r },
+        heading: Math.PI / 2 + jitter,
+      };
     case 1:
       return {
         color,
-        pos: { x: world.width + r, y: along * world.height },
+        pos: { x: b.maxX + r, y: along * world.height },
         heading: Math.PI + jitter,
       };
     case 2:
       return {
         color,
-        pos: { x: along * world.width, y: world.height + r },
+        pos: { x: along * world.width, y: b.maxY + r },
         heading: -Math.PI / 2 + jitter,
       };
     default:
-      return { color, pos: { x: -r, y: along * world.height }, heading: jitter };
+      return { color, pos: { x: b.minX - r, y: along * world.height }, heading: jitter };
   }
 }
 

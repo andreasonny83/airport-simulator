@@ -12,7 +12,8 @@ import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { PLANE_GRAB_RADIUS } from "../config";
 import { distance } from "../core/math";
-import { anchorPath, appendPathPoint, startPath } from "../core/path";
+import { anchorPath, appendPathPoint, clampPathPoint, startPath } from "../core/path";
+import { isInAirspace } from "../core/layout";
 import type { GameState, Plane, Vec2 } from "../core/types";
 import { fromScene } from "../render/coords";
 
@@ -57,6 +58,18 @@ function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
 }
 
 /**
+ * Hooks that tell the player why a path stopped growing. Paths can't be
+ * drawn past the edge of the field (see core/path.ts `clampPathPoint`);
+ * without feedback a clipped line looks like a bug.
+ */
+export interface PointerFeedback {
+  /** A drag pushed past the edge. Fires once per drag, on the first push. */
+  onEdgeBlocked?: (plane: Plane) => void;
+  /** Whether any drag currently has its pointer past the edge. */
+  onEdgeHover?: (active: boolean) => void;
+}
+
+/**
  * Wire pointer events on `canvas` to path drawing.
  * @returns a function that removes all listeners.
  */
@@ -65,9 +78,29 @@ export function attachPointerInput(
   scene: Scene,
   camera: Camera,
   getState: () => GameState,
+  feedback: PointerFeedback = {},
 ): () => void {
   /** pointerId → id of the plane that pointer is routing. */
   const active = new Map<number, number>();
+  /** Pointers whose drag has already hit the edge (warn once per drag). */
+  const warned = new Set<number>();
+  /** Pointers currently past the edge mid-drag. */
+  const outside = new Set<number>();
+
+  /** Record whether `pointerId` is past the edge; report changes. */
+  const setOutside = (pointerId: number, isOutside: boolean) => {
+    const before = outside.size > 0;
+    if (isOutside) outside.add(pointerId);
+    else outside.delete(pointerId);
+    if (before !== outside.size > 0) feedback.onEdgeHover?.(outside.size > 0);
+  };
+
+  /** Stop routing: forget the pointer and clear its edge state. */
+  const release = (pointerId: number) => {
+    active.delete(pointerId);
+    warned.delete(pointerId);
+    setOutside(pointerId, false);
+  };
 
   const toCanvas = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
@@ -96,19 +129,31 @@ export function attachPointerInput(
     const plane = state.planes.find((p) => p.id === planeId);
     // Plane landed/crashed/removed mid-drag: stop routing it.
     if (!plane || plane.phase !== "flying" || state.phase !== "playing") {
-      active.delete(e.pointerId);
+      release(e.pointerId);
       return;
     }
     const { x, y } = toCanvas(e);
-    const point = screenToWorld(scene, camera, state, x, y);
+    const hit = screenToWorld(scene, camera, state, x, y);
+    if (!hit) return;
+
+    // Paths stop at the edge of the field (see clampPathPoint). Tell the
+    // player, once per drag, so the clipped line doesn't look broken.
+    const pastEdge = !isInAirspace(hit, state.world);
+    setOutside(e.pointerId, pastEdge);
+    if (pastEdge && !warned.has(e.pointerId)) {
+      warned.add(e.pointerId);
+      feedback.onEdgeBlocked?.(plane);
+    }
+
+    const point = clampPathPoint(plane, hit, state.world);
     if (!point || !appendPathPoint(plane, point)) return;
     // Reached the runway from the right direction: the path snaps onto the
     // threshold and is finished, so this pointer stops routing the plane.
-    if (anchorPath(plane, state.runways)) active.delete(e.pointerId);
+    if (anchorPath(plane, state.runways)) release(e.pointerId);
   };
 
   const onUp = (e: PointerEvent) => {
-    active.delete(e.pointerId);
+    release(e.pointerId);
   };
 
   canvas.addEventListener("pointerdown", onDown);

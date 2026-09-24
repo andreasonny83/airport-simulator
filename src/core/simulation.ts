@@ -8,7 +8,8 @@
  *   3. land    – planes over a matching threshold start their rollout; a
  *                landing may open a new runway colour
  *   4. collide – any remaining flying planes that overlap end the game
- *   5. prune   – planes that finished rolling out are removed
+ *   5. prune   – planes that finished rolling out, or flew off the world,
+ *                are removed
  */
 import { checkLanding } from "./landing";
 import { detectCollisions } from "./collision";
@@ -18,10 +19,14 @@ import { nextSpawnInterval, spawnPlane } from "./spawner";
 import { resetGameState } from "./state";
 import type { GameState, Rng, SimEvent } from "./types";
 
-/** Begin a new shift: reset state and put the first plane in the air. */
+/**
+ * Begin a new shift: reset state and put the first plane in the air. The
+ * opening plane can't be sent off the world: the player has to land it.
+ */
 export function startGame(state: GameState, rng: Rng = Math.random): void {
   resetGameState(state);
-  spawnPlane(state, rng);
+  const first = spawnPlane(state, rng);
+  if (first) first.canDepart = false;
 }
 
 /**
@@ -92,6 +97,6 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
   }
 
   // 5. Prune.
-  state.planes = state.planes.filter((p) => p.phase !== "landed");
+  state.planes = state.planes.filter((p) => p.phase !== "landed" && p.phase !== "departed");
   return events;
 }
