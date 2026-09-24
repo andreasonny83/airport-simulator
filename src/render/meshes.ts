@@ -1,23 +1,36 @@
 /**
- * Mesh + material factory: low-poly planes and warning rings (runways live
- * in runway.ts).
+ * Mesh + material factory: aircraft, warning rings (runways live in
+ * runway.ts) and the glow layer for aircraft lights.
  *
- * Plane meshes are built once per colour as a hidden template and then
- * cloned, so every plane of a colour shares geometry and material.
+ * Aircraft are built once per (model, colour) as a hidden template (see
+ * aircraft.ts) and then cloned, so every plane of a kind and colour shares
+ * geometry, and all planes share one vertex-coloured paint material.
  */
+import "@babylonjs/core/Layers/effectLayerSceneComponent"; // side effect: effect layer rendering
+import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
+import { FresnelParameters } from "@babylonjs/core/Materials/fresnelParameters";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import { ANCHOR_RADIUS, COLOR_HEX, PLANE_RADIUS } from "../config";
 import type { RunwayColor } from "../core/types";
+import {
+  buildAircraftTemplate,
+  rigFromClone,
+  type AircraftKind,
+  type AircraftMaterials,
+  type AircraftRig,
+} from "./aircraft";
 import { OVERLAY_GROUP } from "./scene";
 
 export class MeshFactory {
   private readonly colorMaterials = new Map<RunwayColor, StandardMaterial>();
-  private readonly planeTemplates = new Map<RunwayColor, Mesh>();
+  private readonly aircraftTemplates = new Map<string, Mesh>();
+  private readonly aircraftMaterials: AircraftMaterials;
+  /** Soft halo around nav lights and strobes; only lights are included. */
+  private readonly glow: GlowLayer;
   private readonly warning: StandardMaterial;
   private readonly anchor: StandardMaterial;
 
@@ -32,6 +45,16 @@ export class MeshFactory {
     this.anchor = new StandardMaterial("anchor", scene);
     this.anchor.disableLighting = true;
     this.anchor.emissiveColor = Color3.FromHexString("#22c55e");
+
+    this.aircraftMaterials = this.makeAircraftMaterials();
+    // Exclude by default: with an empty include list (no planes yet) the
+    // layer would otherwise make every emissive surface glow.
+    this.glow = new GlowLayer("aircraft-lights", scene, {
+      mainTextureRatio: 0.5,
+      blurKernelSize: 24,
+      excludeByDefault: true,
+    });
+    this.glow.intensity = 1.1;
   }
 
   /** Shared material for a runway/plane colour. */
@@ -44,17 +67,39 @@ export class MeshFactory {
     return mat;
   }
 
-  /** New plane mesh (nose along +x, centred on the origin). */
-  createPlane(color: RunwayColor, name: string): Mesh {
-    let template = this.planeTemplates.get(color);
+  /**
+   * New aircraft of `kind` in `color` (nose along +x, centred on the
+   * origin), with its animated parts sorted into a rig.
+   */
+  createAircraft(kind: AircraftKind, color: RunwayColor, id: number, name: string): AircraftRig {
+    const key = `${kind}-${color}`;
+    let template = this.aircraftTemplates.get(key);
     if (!template) {
-      template = this.buildPlaneTemplate(color);
-      this.planeTemplates.set(color, template);
+      const team = Color3.FromHexString(COLOR_HEX[color]);
+      template = buildAircraftTemplate(
+        this.scene,
+        kind,
+        team,
+        this.aircraftMaterials,
+        `tpl-${key}`,
+      );
+      this.aircraftTemplates.set(key, template);
     }
-    const mesh = template.clone(name);
-    mesh.setEnabled(true);
-    mesh.renderingGroupId = OVERLAY_GROUP; // set per clone: not copied from the template
-    return mesh;
+    const root = template.clone(name);
+    root.setEnabled(true);
+    const rig = rigFromClone(kind, root, id);
+    // Rendering group is set per clone: it isn't copied from the template.
+    for (const mesh of rig.all) mesh.renderingGroupId = OVERLAY_GROUP;
+    for (const mesh of rig.lights) this.glow.addIncludedOnlyMesh(mesh);
+    return rig;
+  }
+
+  /** Dispose a plane made by `createAircraft`, children and glow entries too. */
+  disposeAircraft(rig: AircraftRig): void {
+    // The glow layer keeps ids of included meshes and doesn't drop them on
+    // dispose, so remove them by hand or the list grows every plane.
+    for (const mesh of rig.lights) this.glow.removeIncludedOnlyMesh(mesh);
+    rig.root.dispose();
   }
 
   /** Flat red ring shown around planes on a collision course. */
@@ -87,27 +132,47 @@ export class MeshFactory {
     return ring;
   }
 
-  /** Merge a few boxes into a simple airliner silhouette. */
-  private buildPlaneTemplate(color: RunwayColor): Mesh {
-    const r = PLANE_RADIUS;
-    const box = (w: number, h: number, d: number, x: number, y: number) => {
-      const m = CreateBox("part", { width: w, height: h, depth: d }, this.scene);
-      m.position.set(x, y, 0);
-      return m;
+  /** Materials shared by every aircraft part (see aircraft.ts). */
+  private makeAircraftMaterials(): AircraftMaterials {
+    const paint = new StandardMaterial("aircraft-paint", this.scene);
+    // White diffuse: the per-vertex livery colours supply the hue.
+    paint.diffuseColor = Color3.White();
+    // Satin paint: a soft sun sheen that slides along the fuselage as the
+    // plane turns. Brighter reads as a light source rather than gloss.
+    paint.specularColor = new Color3(0.18, 0.18, 0.18);
+    paint.specularPower = 24;
+    // A faint rim light on surfaces edge-on to the camera separates the
+    // silhouette from the grass without washing out the team colour.
+    paint.emissiveColor = new Color3(0.06, 0.06, 0.06);
+    paint.emissiveFresnelParameters = new FresnelParameters({
+      bias: 0.1,
+      power: 2,
+      leftColor: new Color3(0.28, 0.3, 0.32),
+      rightColor: Color3.Black(),
+    });
+    // Thin slabs (wings, fins) are modelled without caring about winding.
+    paint.backFaceCulling = false;
+
+    const disc = new StandardMaterial("prop-disc", this.scene);
+    disc.disableLighting = true;
+    disc.emissiveColor = new Color3(0.75, 0.78, 0.82);
+    disc.alpha = 0.16;
+    disc.backFaceCulling = false;
+
+    const lamp = (name: string, hex: string) => {
+      const mat = new StandardMaterial(name, this.scene);
+      mat.disableLighting = true;
+      mat.emissiveColor = Color3.FromHexString(hex);
+      return mat;
     };
-    const parts = [
-      box(r * 2, r * 0.36, r * 0.36, 0, 0), // fuselage
-      box(r * 0.6, r * 0.08, r * 2, r * 0.1, 0), // main wings
-      box(r * 0.35, r * 0.06, r * 0.85, -r * 0.8, 0.05), // tailplane
-      box(r * 0.4, r * 0.5, r * 0.06, -r * 0.8, r * 0.25), // fin
-    ];
-    const merged = Mesh.MergeMeshes(parts, true);
-    if (!merged) throw new Error("Failed to build plane mesh");
-    merged.name = `plane-template-${color}`;
-    merged.material = this.material(color);
-    merged.isPickable = false;
-    merged.setEnabled(false);
-    return merged;
+    return {
+      paint,
+      propDisc: disc,
+      navRed: lamp("nav-red", "#ff3b3b"),
+      navGreen: lamp("nav-green", "#3bff6a"),
+      strobe: lamp("strobe", "#ffffff"),
+      beacon: lamp("beacon", "#ff2020"),
+    };
   }
 
   private makeMaterial(name: string, hex: string, glow: number): StandardMaterial {

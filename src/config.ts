@@ -103,9 +103,6 @@ export const EXIT_LOOKAHEAD = 8;
  */
 export const FLIGHT_SUBSTEP = 1 / 120;
 
-/** Visual only: bank angle (radians, ~35°) when turning at `MAX_TURN_RATE`. */
-export const MAX_BANK = 0.6;
-
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
@@ -137,28 +134,122 @@ export const LANDING_ANGLE_TOLERANCE = Math.PI / 3;
  */
 export const ANCHOR_RADIUS = RUNWAY_WIDTH;
 
-/** Distance rolled along the runway before the plane disappears. */
-export const LANDING_ROLL_DISTANCE = 14;
-
-/** Rollout speed as a fraction of cruise: starts fast, ends slow. */
+/** Touchdown speed as a fraction of cruise. */
 export const LANDING_SPEED_START = 0.8;
-export const LANDING_SPEED_END = 0.3;
 
 /**
  * Runway layout as fractions of the world size (CLAUDE.md responsiveness
- * rule). `heading` is the landing direction.
+ * rule). `heading` is the landing direction. `apronSide` puts the taxiway
+ * and hangars on the runway's right (+1) or left (-1), looking along the
+ * landing direction: red and blue face the middle of the field, yellow's
+ * go north of its strip, clear of the red/blue hangars on narrow screens.
  */
 export const RUNWAY_LAYOUT: ReadonlyArray<{
   color: RunwayColor;
   fx: number;
   fy: number;
   heading: number;
+  apronSide: 1 | -1;
 }> = [
   // fy 0.72 (not 0.7) keeps the long diagonal strips clear of the stream.
-  { color: "red", fx: 0.25, fy: 0.72, heading: (-3 * Math.PI) / 4 },
-  { color: "blue", fx: 0.75, fy: 0.72, heading: -Math.PI / 4 },
-  { color: "yellow", fx: 0.5, fy: 0.3, heading: 0 },
+  { color: "red", fx: 0.25, fy: 0.72, heading: (-3 * Math.PI) / 4, apronSide: 1 },
+  { color: "blue", fx: 0.75, fy: 0.72, heading: -Math.PI / 4, apronSide: -1 },
+  { color: "yellow", fx: 0.5, fy: 0.3, heading: 0, apronSide: -1 },
 ];
+
+// ---------------------------------------------------------------------------
+// Airfield: taxiways, stands and hangars (see core/airfield.ts)
+// ---------------------------------------------------------------------------
+//
+// Laid out in each runway's own frame: `u` runs along the landing direction
+// from the runway centre (the far end is at +RUNWAY_LENGTH / 2), `v` runs
+// sideways towards the apron (see `apronSide`).
+//
+//        hangar      hangar          v = HANGAR_DOOR_V … + HANGAR_DEPTH
+//        [stand]     [stand]         v = STAND_V
+//   ======H=====leadIn======leadIn=== v = TAXIWAY_OFFSET  (parallel taxiway)
+//        /                            45° turnoff
+//   ----X---------------------------  v = 0  (runway centreline)
+
+/** `u` where the turnoff leaves the runway centreline. */
+export const RUNWAY_EXIT_U = -3;
+
+/** Distance from the runway centreline to the parallel taxiway. */
+export const TAXIWAY_OFFSET = 6.5;
+
+/** `u` of each stand (one hangar per stand), nearest the turnoff first. */
+export const STAND_U: readonly number[] = [10, 18.5];
+
+/** `v` of each stand, where a plane slows to hangar speed and rolls on in. */
+export const STAND_V = 12;
+
+/** `v` of the hangar doorway (its open front), and the hangar's size. */
+export const HANGAR_DOOR_V = 14.8;
+export const HANGAR_DEPTH = 6.2;
+export const HANGAR_WIDTH = 7;
+
+/** `u` of the hold point on the taxiway, where planes wait for a free stand. */
+export const HOLD_U = 6.5;
+
+/** Paved taxiway width. */
+export const TAXIWAY_WIDTH = 3.2;
+
+/**
+ * Corner radius of taxi routes. The planner rounds every corner into an arc
+ * (shrinking it where segments are short), so turns are always smooth.
+ */
+export const TAXI_TURN_RADIUS = 6;
+/** Tighter radius for the 90° turn off the taxiway into a stand. */
+export const STAND_TURN_RADIUS = 3;
+
+/**
+ * After touchdown the plane curves onto the runway centreline over this
+ * distance, whatever its lateral offset or heading error at the threshold.
+ */
+export const CENTERLINE_MERGE_DISTANCE = 8;
+
+// ---------------------------------------------------------------------------
+// Ground movement (see core/ground.ts)
+// ---------------------------------------------------------------------------
+
+/** Speed through the runway turnoff (units / second). */
+export const TURNOFF_SPEED = 3.5;
+
+/** Cruising speed along the taxiway. */
+export const TAXI_SPEED = 3;
+
+/** Speed rolling from the stand into the hangar. */
+export const STOW_SPEED = 1.4;
+
+/** Gentle braking along the runway, from touchdown down to `TURNOFF_SPEED`. */
+export const ROLLOUT_BRAKE = 0.6;
+
+/** Braking used to stop at the end of a route (stand, hold point, hangar). */
+export const TAXI_BRAKE = 0.9;
+
+/** Braking used to stop behind another plane. */
+export const TRAFFIC_BRAKE = 1.6;
+
+/** Firmest braking ever applied, when a stop is needed sooner than planned. */
+export const MAX_GROUND_BRAKE = 4;
+
+/** Acceleration when pulling away (units / second²). */
+export const GROUND_ACCEL = 1.2;
+
+/**
+ * A plane on the ground won't move onto a point of its route that is closer
+ * than this to another plane on the ground. It stops `GROUND_STOP_BUFFER`
+ * short of the first such point, so queued planes sit nose to tail with a
+ * small gap and never overlap.
+ */
+export const GROUND_SEPARATION = PLANE_RADIUS * 1.9;
+export const GROUND_STOP_BUFFER = 1;
+
+/** How far ahead along its route each plane looks for traffic. */
+export const GROUND_LOOKAHEAD = 18;
+
+/** Distance rolled after touchdown while the plane settles onto its wheels. */
+export const FLARE_DISTANCE = 4.5;
 
 // ---------------------------------------------------------------------------
 // Spawning & difficulty
@@ -224,14 +315,16 @@ export const STREAM_WAVELENGTH = 60;
 
 /**
  * Base line of the stream as a fraction of the world height. 0.5 threads it
- * between the yellow runway (fy 0.3) and the red/blue pair (fy 0.72).
+ * between the yellow runway (fy 0.3) and the red/blue pair (fy 0.72); -0.08
+ * runs it along the top of the field, just clear of the yellow runway's
+ * hangars (their backs sit ~21 units north of the strip).
  */
-export const STREAM_BASE_FY = 0;
+export const STREAM_BASE_FY = -0.08;
 
 /** Candidate trees per 1000 units² (before rejection / density thinning). */
 export const TREE_DENSITY = 0.8;
 
-/** No tree closer than this to any runway edge. */
+/** No tree closer than this to any runway edge, taxiway or hangar. */
 export const TREE_RUNWAY_CLEARANCE = 8;
 
 /** No tree closer than this to the stream's water edge (≥ canopy radius). */
@@ -249,6 +342,22 @@ export const TREE_SCALE_MAX = 2.5;
 
 /** Fraction of trees that are conifers; the rest are broadleaf. */
 export const TREE_CONIFER_SHARE = 0.35;
+
+// ---------------------------------------------------------------------------
+// Camera buttons
+// ---------------------------------------------------------------------------
+
+/** One press of a rotate button turns the view by 15°; presses accumulate. */
+export const ROTATE_STEP = Math.PI / 12;
+
+/** One press of a zoom button scales the view by 25%. */
+export const ZOOM_STEP = 1.25;
+
+/**
+ * Arrow-key pan speed, in view half-heights per second. Scaling by the view
+ * (not world units) keeps the on-screen speed the same at every zoom level.
+ */
+export const PAN_SPEED = 1.2;
 
 // ---------------------------------------------------------------------------
 // Loop

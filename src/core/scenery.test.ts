@@ -9,7 +9,7 @@ import {
   mapBounds,
   valueNoise,
 } from "./scenery";
-import type { Runway } from "./types";
+import type { OrientedRect } from "./types";
 
 const ASPECTS = [0.5, 1, 1.78, 2.4];
 
@@ -38,13 +38,11 @@ describe("valueNoise", () => {
 });
 
 describe("distanceToRunway", () => {
-  const runway: Runway = {
-    color: "red",
+  const runway: OrientedRect = {
     center: { x: 0, y: 0 },
     heading: Math.PI / 2, // long axis along y
     length: 10,
     width: 4,
-    threshold: { x: 0, y: -3.5 },
   };
 
   it("is zero inside and measures from the rotated edges outside", () => {

@@ -1,10 +1,13 @@
 /**
- * Pointer input: drag from a plane to draw its flight path.
+ * Pointer input: drag from a plane to draw its flight path; drag anywhere
+ * else to grab and move the map.
  *
  * Uses DOM Pointer Events, which unify mouse, touch and pen — so this one
  * code path covers mousedown/move/up and touchstart/move/end. Each pointer is
  * tracked separately, so on touch screens several fingers can route several
- * planes at once. Camera controls never consume drags (see render/camera.ts).
+ * planes at once. Grabbing a plane always wins over panning: a press only
+ * pans when no plane is in grab range (or when paths can't be drawn, e.g.
+ * while paused), so routing is never stolen by the camera.
  */
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import "@babylonjs/core/Culling/ray"; // side effect: adds scene.createPickingRay
@@ -58,11 +61,17 @@ function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
 }
 
 /**
- * Hooks that tell the player why a path stopped growing. Paths can't be
- * drawn past the edge of the field (see core/path.ts `clampPathPoint`);
- * without feedback a clipped line looks like a bug.
+ * Hooks out of pointer input. The edge hooks tell the player why a path
+ * stopped growing: paths can't be drawn past the edge of the field (see
+ * core/path.ts `clampPathPoint`), and without feedback a clipped line looks
+ * like a bug.
  */
 export interface PointerFeedback {
+  /**
+   * Empty ground was dragged by (dx, dy), in canvas heights with +y down.
+   * Without this hook, drags that miss a plane do nothing.
+   */
+  onPan?: (dx: number, dy: number) => void;
   /** A drag pushed past the edge. Fires once per drag, on the first push. */
   onEdgeBlocked?: (plane: Plane) => void;
   /** Whether any drag currently has its pointer past the edge. */
@@ -70,7 +79,7 @@ export interface PointerFeedback {
 }
 
 /**
- * Wire pointer events on `canvas` to path drawing.
+ * Wire pointer events on `canvas` to path drawing and map panning.
  * @returns a function that removes all listeners.
  */
 export function attachPointerInput(
@@ -86,6 +95,12 @@ export function attachPointerInput(
   const warned = new Set<number>();
   /** Pointers currently past the edge mid-drag. */
   const outside = new Set<number>();
+  /**
+   * The one pointer dragging the map, and where it was last seen (canvas
+   * pixels). Only one at a time: two fingers panning together would move
+   * the map twice as fast as either finger.
+   */
+  let pan: { pointerId: number; x: number; y: number } | null = null;
 
   /** Record whether `pointerId` is past the edge; report changes. */
   const setOutside = (pointerId: number, isOutside: boolean) => {
@@ -108,21 +123,36 @@ export function attachPointerInput(
   };
 
   const onDown = (e: PointerEvent) => {
+    // Only the primary (left) mouse button draws or pans; touch/pen report 0.
+    if (e.button !== 0) return;
     const state = getState();
-    if (state.phase !== "playing") return;
     const { x, y } = toCanvas(e);
-    const hit = screenToWorld(scene, camera, state, x, y);
+    const hit = state.phase === "playing" ? screenToWorld(scene, camera, state, x, y) : null;
     const plane = hit && findPlaneNear(state.planes, hit);
-    if (!plane) return;
 
-    startPath(plane);
-    active.set(e.pointerId, plane.id);
+    if (plane) {
+      startPath(plane);
+      active.set(e.pointerId, plane.id);
+    } else if (feedback.onPan && pan === null) {
+      pan = { pointerId: e.pointerId, x, y };
+      canvas.style.cursor = "grabbing";
+    } else {
+      return;
+    }
     // Keep receiving move/up for this pointer even if it leaves the canvas.
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
 
   const onMove = (e: PointerEvent) => {
+    if (pan && pan.pointerId === e.pointerId) {
+      const { x, y } = toCanvas(e);
+      const h = canvas.clientHeight || 1;
+      feedback.onPan?.((x - pan.x) / h, (y - pan.y) / h);
+      pan.x = x;
+      pan.y = y;
+      return;
+    }
     const planeId = active.get(e.pointerId);
     if (planeId === undefined) return;
     const state = getState();
@@ -153,6 +183,10 @@ export function attachPointerInput(
   };
 
   const onUp = (e: PointerEvent) => {
+    if (pan && pan.pointerId === e.pointerId) {
+      pan = null;
+      canvas.style.cursor = "";
+    }
     release(e.pointerId);
   };
 

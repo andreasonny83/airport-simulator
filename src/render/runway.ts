@@ -185,11 +185,11 @@ export class RunwayFactory {
 
   /** Runway number decal, reading upright for a plane on approach. */
   private buildNumber(designator: string, x: number): Mesh {
-    // Unrotated, the decal's text reads upright with "up" along local +z.
-    // Rotating +90° about y maps +z → +x and +x → -z, so the text's "up"
-    // points down the runway (the landing direction) and its "right" is the
-    // pilot's right. Sizes are pre-rotation: width = across the text.
-    const decal = CreateGround("number", { width: 2.8, height: 2.6 }, this.scene);
+    // With the ground builder's UVs and DynamicTexture's flipped Y, text drawn
+    // upright ends up with its "up" along local +x and its "right" along -z:
+    // exactly the view of a pilot landing towards +x. So no extra rotation;
+    // width (x) is the text's height, height (z) its width.
+    const decal = CreateGround("number", { width: 2.6, height: 2.8 }, this.scene);
     decal.rotation.y = Math.PI / 2;
     decal.position.set(x, PAINT_Y + 0.015, 0);
     decal.material = this.numberMaterial(designator);

@@ -5,21 +5,17 @@
  *   core  (state + rules, no DOM)  ←  render / input / ui  ←  main.ts
  */
 import "./style.css";
-import { COLOR_HEX, MAX_DT } from "./config";
+import { COLOR_HEX, MAX_DT, ROTATE_STEP, ZOOM_STEP } from "./config";
 import { startGame, step, togglePause } from "./core/simulation";
 import { createGameState, resizeWorld } from "./core/state";
 import type { SimEvent } from "./core/types";
+import { attachPanKeys } from "./input/keyboard";
 import { attachPointerInput } from "./input/pointer";
 import { CameraController } from "./render/camera";
 import { MeshFactory } from "./render/meshes";
 import { createScene } from "./render/scene";
 import { SceneSync } from "./render/sceneSync";
 import { createHud } from "./ui/hud";
-
-/** One press of a rotate button turns the view by 15°; presses accumulate. */
-const ROTATE_STEP = Math.PI / 12;
-/** One press of a zoom button scales the view by 25%. */
-const ZOOM_STEP = 1.25;
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const { engine, scene, shadows } = createScene(canvas);
@@ -44,7 +40,7 @@ function setPaused(paused: boolean): void {
   if ((state.phase === "paused") !== paused && togglePause(state)) hud.setPhase(state.phase);
 }
 
-const hud = createHud({
+const hud = createHud(document.body, {
   onStart: () => {
     startGame(state);
     hud.setScore(state.score);
@@ -57,6 +53,8 @@ const hud = createHud({
 });
 
 attachPointerInput(canvas, scene, cameraController.camera, () => state, {
+  // Dragging empty ground grabs the map.
+  onPan: (dx, dy) => cameraController.dragBy(dx, dy),
   // Paths can't be drawn past the edge: show the border and say why.
   onEdgeHover: (active) => sceneSync.setEdgeHighlight(active),
   onEdgeBlocked: (plane) =>
@@ -66,6 +64,9 @@ attachPointerInput(canvas, scene, cameraController.camera, () => state, {
         : "Land this one — it can't leave",
     ),
 });
+
+// Arrow keys pan the map (held keys are polled in the render loop).
+const panKeys = attachPanKeys();
 
 // Keyboard shortcut: P or Esc toggles pause.
 window.addEventListener("keydown", (e) => {
@@ -96,6 +97,9 @@ function handleEvent(event: SimEvent): void {
     case "unlocked":
       hud.showToast(`${event.color.toUpperCase()} runway open`, COLOR_HEX[event.color]);
       break;
+    case "goAround":
+      hud.showToast(`${event.color.toUpperCase()} runway busy — go around`, COLOR_HEX[event.color]);
+      break;
     case "spawned":
       break;
   }
@@ -113,6 +117,7 @@ engine.runRenderLoop(() => {
 
   for (const event of step(state, dt)) handleEvent(event);
 
+  cameraController.panBy(panKeys.direction(), dt);
   cameraController.update(dt, aspect());
   sceneSync.syncPlanes(state, time);
   scene.render();

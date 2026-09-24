@@ -25,7 +25,7 @@ import {
   TREE_STREAM_CLEARANCE,
 } from "../config";
 import { headingVector, lerp, mulberry32 } from "./math";
-import type { Rng, Runway, Vec2, WorldSize } from "./types";
+import type { OrientedRect, Rng, Runway, Vec2, WorldSize } from "./types";
 
 /** Axis-aligned rectangle in sim coordinates. */
 export interface Bounds {
@@ -178,10 +178,11 @@ export function distanceToPolyline(p: Vec2, line: readonly Vec2[]): number {
 }
 
 /**
- * Distance from `p` to a runway's rectangle (0 when inside). Works in the
- * runway's local frame: `u` along the heading, `v` across it.
+ * Distance from `p` to a runway's rectangle, or any other `OrientedRect`
+ * (0 when inside). Works in the rectangle's local frame: `u` along the
+ * heading, `v` across it.
  */
-export function distanceToRunway(p: Vec2, runway: Runway): number {
+export function distanceToRunway(p: Vec2, runway: OrientedRect): number {
   const dir = headingVector(runway.heading);
   const dx = p.x - runway.center.x;
   const dy = p.y - runway.center.y;
@@ -245,7 +246,10 @@ export function scatterTrees(
     const kind: TreeKind = rng() < TREE_CONIFER_SHARE ? "conifer" : "broadleaf";
     const keepRoll = rng();
 
-    if (runways.some((r) => distanceToRunway(pos, r) < TREE_RUNWAY_CLEARANCE)) continue;
+    // Keep the runway and its taxiway, apron and hangars clear.
+    if (runways.some((r) => distanceToRunway(pos, r.airfield.footprint) < TREE_RUNWAY_CLEARANCE)) {
+      continue;
+    }
     // Cheap band test first: the stream never strays further than
     // STREAM_MAX_OFFSET from its base line, so most points skip the polyline.
     if (

@@ -1,9 +1,10 @@
 /**
  * HTML HUD layered over the canvas: score, start/game-over overlay, pause
- * button, toast notices and the camera buttons. Markup lives in index.html; this module
- * only wires it up.
+ * button, toast notices and the camera buttons. Markup lives in
+ * hudMarkup.ts (shared with Storybook); this module injects and wires it up.
  */
 import type { GamePhase } from "../core/types";
+import { hudMarkup } from "./hudMarkup";
 
 export interface HudCallbacks {
   onStart: () => void;
@@ -28,13 +29,19 @@ export interface Hud {
 /** How long a toast stays fully visible before fading out (ms). */
 const TOAST_MS = 2500;
 
-function byId<T extends HTMLElement>(id: string): T {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing #${id} in index.html`);
-  return el as T;
-}
-
-export function createHud(callbacks: HudCallbacks): Hud {
+/**
+ * Inject the HUD markup at the start of `root` (so it stacks above a canvas
+ * that follows it) and wire it to `callbacks`.
+ */
+export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
+  root.insertAdjacentHTML("afterbegin", hudMarkup());
+  // Scoped to `root` rather than `document`, so Storybook can mount a HUD
+  // inside its own preview element.
+  const byId = <T extends HTMLElement>(id: string): T => {
+    const el = root.querySelector<T>(`#${id}`);
+    if (!el) throw new Error(`Missing #${id} in hudMarkup.ts`);
+    return el;
+  };
   const score = byId("scoreDisplay");
   const overlay = byId("overlay");
   const title = byId("overlayTitle");

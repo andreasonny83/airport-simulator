@@ -4,20 +4,22 @@
  * Order matters:
  *   1. spawn   – new planes appear at the edges, but only while fewer are
  *                flying than the progression cap allows (core/progression.ts)
- *   2. move    – every plane advances by dt
- *   3. land    – planes over a matching threshold start their rollout; a
- *                landing may open a new runway colour
+ *   2. move    – every plane advances by dt: airborne ones along their
+ *                paths, ones on the ground along their taxi routes
+ *   3. land    – planes over a matching threshold touch down and get a
+ *                ground route; a landing may open a new runway colour
  *   4. collide – any remaining flying planes that overlap end the game
- *   5. prune   – planes that finished rolling out, or flew off the world,
- *                are removed
+ *   5. prune   – planes stowed in a hangar, or flown off the world, are
+ *                removed
  */
 import { checkLanding } from "./landing";
 import { detectCollisions } from "./collision";
+import { isTouchdownZoneClear, touchDown, updateGround } from "./ground";
 import { updatePlane } from "./plane";
 import { flyingCount, maxAirborne, newlyUnlockedColors } from "./progression";
 import { nextSpawnInterval, spawnPlane } from "./spawner";
 import { resetGameState } from "./state";
-import type { GameState, Rng, SimEvent } from "./types";
+import type { GameState, Rng, Runway, SimEvent } from "./types";
 
 /**
  * Begin a new shift: reset state and put the first plane in the air. The
@@ -68,11 +70,17 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
 
   // 2. Move.
   for (const plane of state.planes) updatePlane(plane, dt, state.world);
+  updateGround(state, dt);
 
-  // 3. Land.
+  // 3. Land (or go around, if the touchdown zone is blocked).
+  const isClear = (r: Runway) => isTouchdownZoneClear(r, state.planes);
   for (const plane of state.planes) {
-    const runway = checkLanding(plane, state.runways);
-    if (runway) {
+    const result = checkLanding(plane, state.runways, isClear);
+    if (result?.type === "goAround") {
+      events.push({ type: "goAround", planeId: plane.id, color: result.runway.color });
+    } else if (result) {
+      const { runway } = result;
+      touchDown(plane, runway, state.nextGroundSeq++);
       state.score++;
       events.push({ type: "landed", planeId: plane.id, color: runway.color });
       for (const color of newlyUnlockedColors(state.score - 1, state.score, state.runways)) {

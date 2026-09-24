@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANDING_ROLL_DISTANCE, PLANE_RADIUS, PLANE_SPEED } from "../config";
+import { PLANE_RADIUS, PLANE_SPEED } from "../config";
 import { createPlane, updatePlane } from "./plane";
 import type { Plane, WorldSize } from "./types";
 
@@ -70,17 +70,5 @@ describe("updatePlane", () => {
     updatePlane(plane, 0.01, world);
     updatePlane(plane, 0.01, world);
     expect(Math.cos(plane.heading)).toBeGreaterThan(0);
-  });
-
-  it("rolls out while landing and becomes landed after LANDING_ROLL_DISTANCE", () => {
-    const plane = createPlane(1, "red", { x: 50, y: 50 }, 0);
-    plane.phase = "landing";
-    updatePlane(plane, 0.1, world);
-    expect(plane.landingProgress).toBeGreaterThan(0);
-    expect(plane.phase).toBe("landing");
-    simulate(plane, 10, 600);
-    expect(plane.phase).toBe("landed");
-    expect(plane.landingProgress).toBe(1);
-    expect(plane.pos.x - 50).toBeCloseTo(LANDING_ROLL_DISTANCE, 0);
   });
 });

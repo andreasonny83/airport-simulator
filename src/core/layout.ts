@@ -17,6 +17,7 @@ import {
   WORLD_HEIGHT,
   YELLOW_RUNWAY_MIN_WIDTH,
 } from "../config";
+import { layoutAirfield } from "./airfield";
 import { headingVector } from "./math";
 import type { Bounds } from "./scenery";
 import type { Runway, Vec2, WorldSize } from "./types";
@@ -25,6 +26,7 @@ import type { Runway, Vec2, WorldSize } from "./types";
 export function computeWorldSize(aspect: number): WorldSize {
   // Guard against a 0×0 canvas during startup (aspect would be NaN/Infinity).
   const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  // const safeAspect = 1.6;
   return { width: WORLD_HEIGHT * safeAspect, height: WORLD_HEIGHT };
 }
 
@@ -80,8 +82,9 @@ export function isInAirspace(p: Vec2, world: WorldSize): boolean {
   return p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
 }
 
-/** Build the runway list for a given world size. */
+/** Build the runway list (each with its taxiway and hangars) for a world size. */
 export function layoutRunways(world: WorldSize): Runway[] {
+  let nextStandId = 0;
   return RUNWAY_LAYOUT.filter(
     // Narrow (portrait) screens only get two runways, like the prototype.
     (spec) => spec.color !== "yellow" || world.width >= YELLOW_RUNWAY_MIN_WIDTH,
@@ -91,6 +94,8 @@ export function layoutRunways(world: WorldSize): Runway[] {
     // The threshold sits near the runway end the plane arrives at, i.e.
     // *behind* the centre relative to the landing heading.
     const back = RUNWAY_LENGTH / 2 - RUNWAY_THRESHOLD_INSET;
+    const airfield = layoutAirfield(spec.color, center, spec.heading, spec.apronSide, nextStandId);
+    nextStandId += airfield.stands.length;
     return {
       color: spec.color,
       center,
@@ -98,6 +103,7 @@ export function layoutRunways(world: WorldSize): Runway[] {
       length: RUNWAY_LENGTH,
       width: RUNWAY_WIDTH,
       threshold: { x: center.x - dir.x * back, y: center.y - dir.y * back },
+      airfield,
     };
   });
 }

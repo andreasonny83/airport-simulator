@@ -8,9 +8,6 @@
 import {
   EXIT_LOOKAHEAD,
   FLIGHT_SUBSTEP,
-  LANDING_ROLL_DISTANCE,
-  LANDING_SPEED_END,
-  LANDING_SPEED_START,
   MAX_TURN_RATE,
   PLANE_RADIUS,
   PLANE_SPEED,
@@ -18,7 +15,7 @@ import {
   TURN_RESPONSE,
   WAYPOINT_CAPTURE_RADIUS,
 } from "../config";
-import { angleDelta, distance, lerp, normalizeAngle } from "./math";
+import { angleDelta, distance, normalizeAngle } from "./math";
 import { airspaceBounds, isInAirspace } from "./layout";
 import { mapBounds } from "./scenery";
 import type { Plane, RunwayColor, Vec2, WorldSize } from "./types";
@@ -33,27 +30,27 @@ export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: 
     path: [],
     pathVersion: 0,
     phase: "flying",
-    landingProgress: 0,
+    ground: null,
     warning: false,
     pathAnchored: false,
     canDepart: true,
   };
 }
 
-/** Advance one plane by `dt` seconds. */
+/**
+ * Advance one airborne plane by `dt` seconds. Planes on the ground move in
+ * `updateGround` (core/ground.ts) instead, since they need to see each other
+ * to keep their distance.
+ */
 export function updatePlane(plane: Plane, dt: number, world: WorldSize): void {
   switch (plane.phase) {
-    case "landed":
-    case "departed":
-      return;
     case "departing":
       updateDeparting(plane, dt, world);
       return;
-    case "landing":
-      updateLanding(plane, dt);
-      return;
     case "flying":
       updateFlying(plane, dt, world);
+      return;
+    default:
       return;
   }
 }
@@ -216,16 +213,4 @@ function steer(plane: Plane, desired: number, dt: number): void {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
-}
-
-/** Roll along the runway, decelerating, until `LANDING_ROLL_DISTANCE` is covered. */
-function updateLanding(plane: Plane, dt: number): void {
-  const speed = PLANE_SPEED * lerp(LANDING_SPEED_START, LANDING_SPEED_END, plane.landingProgress);
-  const rolledSoFar = plane.landingProgress * LANDING_ROLL_DISTANCE;
-  // Never roll past the end: keeps the final resting spot dt-independent.
-  const dist = Math.min(speed * dt, LANDING_ROLL_DISTANCE - rolledSoFar);
-
-  moveForward(plane, dist);
-  plane.landingProgress = Math.min(1, (rolledSoFar + dist) / LANDING_ROLL_DISTANCE);
-  if (plane.landingProgress >= 1) plane.phase = "landed";
 }

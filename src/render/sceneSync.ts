@@ -12,10 +12,20 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
-import { COLOR_HEX, FLIGHT_ALTITUDE, MAX_BANK, MAX_TURN_RATE } from "../config";
+import {
+  COLOR_HEX,
+  FLARE_DISTANCE,
+  FLIGHT_ALTITUDE,
+  LANDING_SPEED_START,
+  MAX_TURN_RATE,
+  PLANE_SPEED,
+} from "../config";
 import { angleDelta, lerp, normalizeAngle } from "../core/math";
 import type { GameState, Plane, WorldSize } from "../core/types";
+import { aircraftKindFor, animateAircraft, type AircraftRig } from "./aircraft";
+import { AirfieldFactory, type AirfieldView } from "./airfield";
 import { AirspaceBoundary } from "./boundary";
+import { flightTuning } from "./flightTuning";
 import { headingToRotationY, toScene } from "./coords";
 import { Landscape } from "./landscape";
 import type { MeshFactory } from "./meshes";
@@ -38,17 +48,8 @@ const PATH_WIDTH = 0.5;
 const PATH_ALPHA = 0.85;
 /** Height of the green anchor ring: on the ground, just over the runway paint. */
 const ANCHOR_RING_ALTITUDE = 0.2;
-/** Height planes finish their rollout at (sitting on the runway). */
+/** Height of a plane on the ground (sitting on its wheels on the runway). */
 const RUNWAY_ALTITUDE = 0.35;
-/**
- * Easing time constants (seconds) for the displayed yaw and bank. The sim
- * heading is already smooth in flight; the yaw easing only hides the small
- * snap onto the runway heading at touchdown, so it stays short to avoid
- * visible lag in turns. Bank eases more slowly, so the wings level off
- * gracefully after landing.
- */
-const YAW_EASE = 0.05;
-const BANK_EASE = 0.2;
 
 /** Fraction of the way to a target that exponential easing covers in `dt`. */
 function ease(dt: number, tau: number): number {
@@ -56,7 +57,8 @@ function ease(dt: number, tau: number): number {
 }
 
 interface PlaneView {
-  mesh: Mesh;
+  /** The plane's model: root mesh plus its animated parts. */
+  aircraft: AircraftRig;
   ring: Mesh;
   /** Green ring on the threshold while this plane's path is anchored. */
   anchorRing: Mesh;
@@ -67,13 +69,17 @@ interface PlaneView {
   yaw: number | null;
   /** Displayed bank angle (radians, positive = right wing down). */
   bank: number;
+  /** True once moved to the default rendering group on touchdown. */
+  grounded: boolean;
 }
 
 export class SceneSync {
   private readonly views = new Map<number, PlaneView>();
   private runwayViews: RunwayView[] = [];
+  private airfieldViews: AirfieldView[] = [];
   private readonly landscape: Landscape;
   private readonly runwayFactory: RunwayFactory;
+  private readonly airfieldFactory: AirfieldFactory;
   private readonly boundary: AirspaceBoundary;
   /** Camera view direction, refreshed every sync (see `placeOverTrack`). */
   private readonly viewDir = new Vector3(0, -1, 0);
@@ -87,6 +93,7 @@ export class SceneSync {
   ) {
     this.landscape = new Landscape(scene, shadows);
     this.runwayFactory = new RunwayFactory(scene, (color) => factory.material(color));
+    this.airfieldFactory = new AirfieldFactory(scene, (color) => factory.material(color), shadows);
     this.boundary = new AirspaceBoundary(scene);
   }
 
@@ -95,12 +102,14 @@ export class SceneSync {
     this.boundary.setActive(active);
   }
 
-  /** Rebuild static geometry (landscape, runways) after a resize. */
+  /** Rebuild static geometry (landscape, runways, taxiways, hangars) after a resize. */
   rebuildWorld(state: GameState): void {
     fitShadowsToWorld(this.shadows, state.world);
     this.landscape.setWorld(state.world, state.runways);
     for (const view of this.runwayViews) view.dispose();
     this.runwayViews = state.runways.map((r) => this.runwayFactory.create(r, state.world));
+    for (const view of this.airfieldViews) view.dispose();
+    this.airfieldViews = state.runways.map((r) => this.airfieldFactory.create(r, state.world));
     this.boundary.setWorld(state.world);
     // Path lines were built with the old world→scene mapping; force a rebuild.
     for (const view of this.views.values()) view.pathVersion = -1;
@@ -120,25 +129,33 @@ export class SceneSync {
       alive.add(plane.id);
       let view = this.views.get(plane.id);
       if (!view) {
+        const aircraft = this.factory.createAircraft(
+          aircraftKindFor(plane.id),
+          plane.color,
+          plane.id,
+          `plane-${plane.id}`,
+        );
         view = {
-          mesh: this.factory.createPlane(plane.color, `plane-${plane.id}`),
+          aircraft,
           ring: this.factory.createWarningRing(`ring-${plane.id}`),
           anchorRing: this.factory.createAnchorRing(`anchor-${plane.id}`),
           path: null,
           pathVersion: -1,
           yaw: null,
           bank: 0,
+          grounded: false,
         };
         this.views.set(plane.id, view);
-        this.shadows.addShadowCaster(view.mesh);
+        // Solid parts only: prop blur discs and lights cast no shadow.
+        for (const mesh of aircraft.shadowCasters) this.shadows.addShadowCaster(mesh, false);
       }
       this.updateView(view, plane, state.world, time, dt);
     }
 
     for (const [id, view] of this.views) {
       if (alive.has(id)) continue;
-      this.shadows.removeShadowCaster(view.mesh);
-      view.mesh.dispose();
+      for (const mesh of view.aircraft.shadowCasters) this.shadows.removeShadowCaster(mesh, false);
+      this.factory.disposeAircraft(view.aircraft);
       view.ring.dispose();
       view.anchorRing.dispose();
       view.path?.dispose(false, true);
@@ -153,41 +170,57 @@ export class SceneSync {
     time: number,
     dt: number,
   ): void {
-    const landing = plane.phase === "landing" || plane.phase === "landed";
-    const t = plane.landingProgress;
+    const ground = plane.ground;
 
-    // Altitude: cruise, then descend onto the runway during the first third
-    // of the rollout.
-    const descent = landing ? Math.min(1, t * 3) : 0;
+    // Altitude: cruise, then settle onto the runway over the first few units
+    // rolled after touchdown.
+    const descent = ground ? Math.min(1, ground.travelled / FLARE_DISTANCE) : 0;
     const altitude = lerp(FLIGHT_ALTITUDE, RUNWAY_ALTITUDE, descent);
+
+    // On the ground, draw with the scenery (depth-tested) rather than on top
+    // of it, so a plane rolling into its hangar disappears behind the walls.
+    if (ground && !view.grounded) {
+      view.grounded = true;
+      for (const mesh of view.aircraft.all) mesh.renderingGroupId = 0;
+    }
 
     // Visual-only wind, fading out as the wheels touch the runway. The
     // offset is applied to the mesh only: the sim position never moves.
     const wind = windEffect(time, plane.id, plane.heading, 1 - descent);
-    this.placeOverTrack(plane, world, altitude, view.mesh.position);
-    view.mesh.position.x += wind.drift.x;
-    view.mesh.position.z -= wind.drift.y; // sim +y is scene -z (see coords.ts)
-    view.mesh.position.y += wind.lift;
+    const root = view.aircraft.root;
+    this.placeOverTrack(plane, world, altitude, root.position);
+    root.position.x += wind.drift.x;
+    root.position.z -= wind.drift.y; // sim +y is scene -z (see coords.ts)
+    root.position.y += wind.lift;
 
     // Yaw: heading plus crab into the wind, eased the short way round.
     const targetYaw = plane.heading + wind.crab;
     view.yaw =
       view.yaw === null
         ? targetYaw
-        : normalizeAngle(view.yaw + angleDelta(view.yaw, targetYaw) * ease(dt, YAW_EASE));
+        : normalizeAngle(
+            view.yaw + angleDelta(view.yaw, targetYaw) * ease(dt, flightTuning.yawEase),
+          );
     // Bank into turns in proportion to the sim turn rate. A positive turn
     // rate turns the nose to the plane's right, and rolling the right wing
     // down is a negative rotation about the nose (+x) axis.
-    const targetBank = (plane.turnRate / MAX_TURN_RATE) * MAX_BANK;
-    view.bank += (targetBank - view.bank) * ease(dt, BANK_EASE);
-    view.mesh.rotation.set(
+    const targetBank = (plane.turnRate / MAX_TURN_RATE) * flightTuning.maxBank;
+    view.bank += (targetBank - view.bank) * ease(dt, flightTuning.bankEase);
+    root.rotation.set(
       -(view.bank + wind.roll), // roll about the nose
       headingToRotationY(view.yaw),
       wind.pitch,
     );
-    // Fade out over the second half of the rollout. Departing planes stay
-    // opaque: they simply fly out of view.
-    view.mesh.visibility = landing ? 1 - Math.max(0, (t - 0.5) * 2) : 1;
+    // Moving parts: wing flex, prop spin, strobes. Props wind down as the
+    // plane slows, to an idle on the stand.
+    const touchdownSpeed = PLANE_SPEED * LANDING_SPEED_START;
+    animateAircraft(view.aircraft, {
+      time,
+      dt,
+      bank: view.bank,
+      chop: wind.chop,
+      rollout: ground ? 1 - Math.min(1, ground.speed / touchdownSpeed) : 0,
+    });
 
     // Proximity warning ring, pulsing.
     const warn = plane.warning && plane.phase === "flying";

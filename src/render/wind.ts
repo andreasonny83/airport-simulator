@@ -16,20 +16,9 @@
  * plane still sits near its path line and under the player's finger.
  */
 import type { Vec2 } from "../core/types";
+import { flightTuning } from "./flightTuning";
 
-/** Largest drift offset along the wind (world units, about half a plane length). */
-const DRIFT_AMPLITUDE = 0.1;
-/** Largest sideways wander across the wind, as a fraction of the drift. */
-const WANDER_SHARE = 0.1;
-/** Largest crab angle into a full-strength crosswind (radians, ~10°). */
-const MAX_CRAB = 0.1;
-/** Largest turbulence roll wobble (radians, ~8°); pitch uses half. */
-const BUMP_AMPLITUDE = 0.1;
-/** Largest altitude bob (scene units). */
-const LIFT_AMPLITUDE = 0.1;
-/** Prevailing wind direction (sim radians) and how far it slowly veers. */
-const BASE_DIRECTION = Math.PI * 0.15;
-const VEER = 0.5;
+// Amplitudes, direction and veer are live values in flightTuning.ts.
 
 /** Visual wind effect for one plane at one moment. */
 export interface WindEffect {
@@ -43,6 +32,8 @@ export interface WindEffect {
   pitch: number;
   /** Extra altitude (scene units): up and down bumps. */
   lift: number;
+  /** Raw turbulence chop, roughly -1..1 (drives wing flex in aircraft.ts). */
+  chop: number;
 }
 
 /**
@@ -74,7 +65,7 @@ export function turbulence(time: number, phase: number): number {
  */
 function windAt(time: number): { dir: number; strength: number } {
   return {
-    dir: BASE_DIRECTION + VEER * Math.sin(time * 0.05),
+    dir: flightTuning.windDirection + flightTuning.windVeer * Math.sin(time * 0.05),
     strength: 0.7 + 0.3 * Math.sin(time * 0.13 + 1.3),
   };
 }
@@ -108,16 +99,18 @@ export function windEffect(
   // opposite way) to cancel the drift.
   const crosswind = Math.sin(dir - heading) * strength * exposure;
 
+  const t = flightTuning;
   return {
     drift: {
       // Along the wind, plus a smaller push across it (perpendicular is
       // (-sin, cos)).
-      x: (Math.cos(dir) * gust - Math.sin(dir) * wander * WANDER_SHARE) * DRIFT_AMPLITUDE,
-      y: (Math.sin(dir) * gust + Math.cos(dir) * wander * WANDER_SHARE) * DRIFT_AMPLITUDE,
+      x: (Math.cos(dir) * gust - Math.sin(dir) * wander * t.wanderShare) * t.driftAmplitude,
+      y: (Math.sin(dir) * gust + Math.cos(dir) * wander * t.wanderShare) * t.driftAmplitude,
     },
-    crab: -crosswind * MAX_CRAB,
-    roll: chop * BUMP_AMPLITUDE,
-    pitch: gust * BUMP_AMPLITUDE * 0.5,
-    lift: chop * LIFT_AMPLITUDE,
+    crab: -crosswind * t.maxCrab,
+    roll: chop * t.bumpAmplitude,
+    pitch: gust * t.bumpAmplitude * 0.5,
+    lift: chop * t.liftAmplitude,
+    chop,
   };
 }

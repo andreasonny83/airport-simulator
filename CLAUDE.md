@@ -10,14 +10,15 @@ This project is an Air Traffic Control game, inspired by classic mobile games li
 
 - **Frontend Framework:** TypeScript (strict) client-side app, built and served by Vite. No backend.
 - **Styling:** Tailwind CSS v4 (`@tailwindcss/vite`) for the HTML HUD/overlay layered over the canvas.
-- **Rendering:** Babylon.js (`@babylonjs/core`, ES module deep imports for tree-shaking), WebGL. Tilted orthographic `ArcRotateCamera`; rotate/zoom via HUD buttons + mouse wheel only — every canvas drag draws a flight path. `@babylonjs/lite` was rejected for now (WebGPU-only, young API); keep all Babylon code inside `src/render/` and `src/input/` so a later migration stays contained.
+- **Rendering:** Babylon.js (`@babylonjs/core`, ES module deep imports for tree-shaking), WebGL. Tilted orthographic `ArcRotateCamera`; rotate/zoom via HUD buttons + mouse wheel; pan via arrow keys or dragging empty ground (a drag that starts on a plane always draws its flight path instead). `@babylonjs/lite` was rejected for now (WebGPU-only, young API); keep all Babylon code inside `src/render/` and `src/input/` so a later migration stays contained.
 - **Tests:** Vitest, for the pure `src/core` layer (`npm test`).
 - **Architecture:** Three layers with one-way dependencies:
   - `src/core/` — pure simulation (state, rules, `step(state, dt)`), no DOM or Babylon imports. Sim runs in 2D world units: height fixed at 100, width = 100 × aspect.
   - `src/render/`, `src/input/`, `src/ui/` — Babylon scene sync, pointer input, HTML HUD. They read state; only input mutates it (via `core/path.ts`).
   - `src/main.ts` — wiring and the render loop.
   - Sim `(x, y)` maps to Babylon `(x, z)` via `src/render/coords.ts`.
-- **Scripts:** `dev`, `build`, `preview`, `test`, `typecheck`, `lint`, `format`.
+- **Scripts:** `dev`, `build`, `preview`, `storybook`, `build-storybook`, `test`, `typecheck`, `lint`, `format`.
+- **Storybook:** (`@storybook/html-vite`) showcases every UI element for tuning. HUD stories live in `src/ui/*.stories.ts`, Babylon stories in `src/render/stories/` (shared stage in `stage.ts`). HUD markup lives in `src/ui/hudMarkup.ts` (injected by `createHud`), so game and stories share one source. Edit a constant and the open story hot-reloads. Flight animation (banking, wing flex, props, lights, wind) lives in `src/render/flightTuning.ts` as named presets; the game plays `ACTIVE_PRESET`, and the "Tuning/Flight" stories edit values live and emit a preset snippet to paste back.
 - `sample.html` is the original single-file 2D prototype, kept as a reference only (not built).
 
 ## Game Design & Inspiration

@@ -1,9 +1,10 @@
 /**
- * Tilted orthographic camera with button-driven rotate/zoom.
+ * Tilted orthographic camera with button-driven rotate/zoom and arrow-key pan.
  *
  * The camera is deliberately NOT attached to pointer input: every drag on the
  * canvas draws a flight path. Rotation and zoom come from HUD buttons and the
- * mouse wheel only.
+ * mouse wheel; panning comes from the arrow keys (see input/keyboard.ts) and
+ * from dragging empty ground (see input/pointer.ts).
  *
  * Tilt (beta) is fixed at ~52° off vertical for a strong 3D read of runways,
  * trees and planes; only alpha (heading) and zoom change at runtime.
@@ -12,15 +13,15 @@ import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { CAMERA_TILT } from "../config";
+import { CAMERA_TILT, PAN_SPEED } from "../config";
 import { viewHalfHeight } from "../core/layout";
-import type { WorldSize } from "../core/types";
+import type { Vec2, WorldSize } from "../core/types";
 
 /** Distance from target; with ortho it only needs to clear the scene. */
 const CAMERA_RADIUS = 400;
 /** Lowest zoom shows ~2× the playfield; the landscape map is sized to cover it. */
 const ZOOM_MIN = 0.45;
-const ZOOM_MAX = 2.5;
+const ZOOM_MAX = 5;
 /** How quickly zoom eases towards its target (1 / seconds). */
 const EASE_RATE = 10;
 /** Slower ease for rotation so heading changes glide rather than snap. */
@@ -33,6 +34,8 @@ export class CameraController {
   private targetAlpha: number;
   private zoom = 1;
   private targetZoom = 1;
+  /** Where the camera target is easing towards, in scene XZ (x, z). */
+  private targetPan = { x: 0, z: 0 };
 
   constructor(scene: Scene, canvas: HTMLCanvasElement) {
     // alpha = -PI/2 puts the camera on the -z side looking towards +z.
@@ -65,6 +68,8 @@ export class CameraController {
 
   setWorld(world: WorldSize): void {
     this.world = world;
+    // A resize can shrink the field under the current pan: pull it back in.
+    clampToField(this.targetPan, this.world);
   }
 
   /** Queue a rotation around the vertical axis (radians, eased). */
@@ -77,14 +82,77 @@ export class CameraController {
     this.targetZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, this.targetZoom * factor));
   }
 
-  /** Ease towards the target rotation/zoom and refit the ortho frustum. */
+  /**
+   * Move the view for `dt` seconds in a screen-space direction (+x right,
+   * +y up the screen, each in [-1, 1]), e.g. from held arrow keys. Eased.
+   */
+  panBy(direction: Vec2, dt: number): void {
+    if (direction.x === 0 && direction.y === 0) return;
+    // Speed in view half-heights per second: same on-screen speed at any zoom.
+    const step = this.orthoHalfHeight() * PAN_SPEED * dt;
+    const d = this.screenToGround(direction.x * step, direction.y * step);
+    this.targetPan.x += d.x;
+    this.targetPan.z += d.z;
+    clampToField(this.targetPan, this.world);
+  }
+
+  /**
+   * Grab-and-drag the map: the pointer moved by (dx, dy), measured in canvas
+   * heights with +y DOWN the screen (DOM convention). Applied immediately,
+   * not eased, so the ground stays pinned under the cursor.
+   */
+  dragBy(dx: number, dy: number): void {
+    // The visible height spans 2 × the ortho half-height in world units.
+    const scale = 2 * this.orthoHalfHeight();
+    // Dragging the map right moves the camera left; dragging down (DOM +y)
+    // moves the camera up the screen.
+    const d = this.screenToGround(-dx * scale, dy * scale);
+    const target = this.camera.target;
+    target.x += d.x;
+    target.z += d.z;
+    clampToField(target, this.world);
+    // Keep the eased goal in lockstep so nothing drifts after release.
+    this.targetPan.x = target.x;
+    this.targetPan.z = target.z;
+  }
+
+  /** Ease towards the target rotation/zoom/pan and refit the ortho frustum. */
   update(dt: number, aspect: number): void {
     // Exponential smoothing: frame-rate independent, unlike a fixed lerp factor.
     const kRotate = 1 - Math.exp(-ROTATE_EASE_RATE * dt);
     const kZoom = 1 - Math.exp(-EASE_RATE * dt);
     this.camera.alpha += (this.targetAlpha - this.camera.alpha) * kRotate;
     this.zoom += (this.targetZoom - this.zoom) * kZoom;
+    // Mutate the target in place: assigning `camera.target` calls setTarget,
+    // which rebuilds alpha/beta from the old position and breaks the tilt lock.
+    const target = this.camera.target;
+    target.x += (this.targetPan.x - target.x) * kZoom;
+    target.z += (this.targetPan.z - target.z) * kZoom;
     this.fit(aspect);
+  }
+
+  /** Current ortho half-height in world units (reflects the eased zoom). */
+  private orthoHalfHeight(): number {
+    return this.camera.orthoTop ?? 1;
+  }
+
+  /**
+   * Convert a screen-space offset (world units as seen on screen, +x right,
+   * +y up) into a ground (scene XZ) offset, using the CURRENT heading so "up"
+   * always means away from the player however the view has been rotated.
+   */
+  private screenToGround(right: number, up: number): { x: number; z: number } {
+    // The camera sits at (cos α, sin α) from its target on the ground plane,
+    // looking back at it: "up the screen" is the opposite way, and screen
+    // right is that rotated a quarter turn (Babylon is left-handed).
+    const a = this.camera.alpha;
+    // Ground depth is foreshortened by cos(tilt) on screen, so a given screen
+    // distance up covers more ground than the same distance sideways.
+    const forward = up / Math.cos(this.camera.beta);
+    return {
+      x: -Math.sin(a) * right - Math.cos(a) * forward,
+      z: Math.cos(a) * right - Math.sin(a) * forward,
+    };
   }
 
   /**
@@ -107,4 +175,16 @@ export class CameraController {
     this.camera.orthoLeft = -halfW;
     this.camera.orthoRight = halfW;
   }
+}
+
+/**
+ * Keep the centre of the view over the playfield (scene XZ is centred on the
+ * field). The landscape is MAP_SCALE× the field's size, so even fully zoomed
+ * out over a corner the map edge stays off screen.
+ */
+function clampToField(p: { x: number; z: number }, world: WorldSize): void {
+  const halfW = world.width / 2;
+  const halfH = world.height / 2;
+  p.x = Math.min(halfW, Math.max(-halfW, p.x));
+  p.z = Math.min(halfH, Math.max(-halfH, p.z));
 }

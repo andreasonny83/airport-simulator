@@ -13,8 +13,11 @@ export interface CollisionResult {
 }
 
 /**
- * Pairwise check of all *flying* planes (landing planes are on the ground and
- * can't collide). O(n²), which is fine for the handful of planes on screen.
+ * Pairwise check of all *flying* planes. Planes on the ground (landing,
+ * taxiing, stowing) are ignored: aircraft overhead never collide with
+ * them or warn about them, and they keep their own spacing (core/ground.ts).
+ * Departing planes are ignored too. O(n²), which is fine for the handful of
+ * planes on screen.
  */
 export function detectCollisions(planes: readonly Plane[]): CollisionResult {
   const flying = planes.filter((p) => p.phase === "flying");
