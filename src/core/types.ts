@@ -97,7 +97,9 @@ export interface GameState {
 export type SimEvent =
   | { type: "spawned"; planeId: number }
   | { type: "landed"; planeId: number; color: RunwayColor }
-  | { type: "crash"; planeIds: [number, number]; at: Vec2 };
+  | { type: "crash"; planeIds: [number, number]; at: Vec2 }
+  /** A landing pushed the score far enough to open another runway colour. */
+  | { type: "unlocked"; color: RunwayColor };
 
 /** Random source in `[0, 1)`. Injected so tests can be deterministic. */
 export type Rng = () => number;

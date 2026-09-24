@@ -1,6 +1,6 @@
 /**
  * HTML HUD layered over the canvas: score, start/game-over overlay, pause
- * button and the camera buttons. Markup lives in index.html; this module
+ * button, toast notices and the camera buttons. Markup lives in index.html; this module
  * only wires it up.
  */
 import type { GamePhase } from "../core/types";
@@ -21,7 +21,12 @@ export interface Hud {
   showGameOver(score: number): void;
   /** Sync the pause button and banner with the current game phase. */
   setPhase(phase: GamePhase): void;
+  /** Briefly show a notice at the top of the screen, optionally tinted. */
+  showToast(text: string, color?: string): void;
 }
+
+/** How long a toast stays fully visible before fading out (ms). */
+const TOAST_MS = 2500;
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -37,6 +42,8 @@ export function createHud(callbacks: HudCallbacks): Hud {
   const startBtn = byId<HTMLButtonElement>("startBtn");
   const pauseBtn = byId<HTMLButtonElement>("pauseBtn");
   const pausedBanner = byId("pausedBanner");
+  const toast = byId("toast");
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   startBtn.addEventListener("click", callbacks.onStart);
   pauseBtn.addEventListener("click", () => {
@@ -75,6 +82,14 @@ export function createHud(callbacks: HudCallbacks): Hud {
       // `hidden` and `flex` both set `display`, so swap them rather than stack.
       pausedBanner.classList.toggle("hidden", !paused);
       pausedBanner.classList.toggle("flex", paused);
+    },
+    showToast(text, color) {
+      toast.textContent = text;
+      toast.style.color = color ?? "";
+      toast.classList.remove("opacity-0");
+      // A newer toast replaces the old one and restarts the clock.
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.add("opacity-0"), TOAST_MS);
     },
   };
 }

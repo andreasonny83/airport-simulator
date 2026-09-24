@@ -4,6 +4,7 @@
 import { PLANE_RADIUS, SPAWN_HEADING_JITTER, WARNING_DISTANCE } from "../config";
 import { distance } from "./math";
 import { createPlane } from "./plane";
+import { unlockedColors } from "./progression";
 import type { GameState, Plane, Rng, RunwayColor, Vec2, WorldSize } from "./types";
 
 export interface SpawnSpec {
@@ -47,13 +48,13 @@ export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng:
 const SPAWN_ATTEMPTS = 5;
 
 /**
- * Add a new plane to `state`, only using colours that currently have a
- * runway. Re-rolls a few times to avoid spawning into an instant crash.
+ * Add a new plane to `state`, only using colours whose runway exists and
+ * has been unlocked at the current score (see `unlockedColors`). Re-rolls a few times to avoid spawning into an instant crash.
  *
  * @returns the new plane, or null if there are no runways.
  */
 export function spawnPlane(state: GameState, rng: Rng): Plane | null {
-  const colors = state.runways.map((r) => r.color);
+  const colors = unlockedColors(state.score, state.runways);
   if (colors.length === 0) return null;
 
   let spec = pickSpawn(state.world, colors, rng);

@@ -10,16 +10,20 @@ import type { Camera } from "@babylonjs/core/Cameras/camera";
 import "@babylonjs/core/Culling/ray"; // side effect: adds scene.createPickingRay
 import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { FLIGHT_ALTITUDE, PLANE_GRAB_RADIUS } from "../config";
+import { PLANE_GRAB_RADIUS } from "../config";
 import { distance } from "../core/math";
 import { appendPathPoint, startPath } from "../core/path";
 import type { GameState, Plane, Vec2 } from "../core/types";
 import { fromScene } from "../render/coords";
 
 /**
- * Cast a ray from a screen point and intersect it with the horizontal plane
- * at `altitude`. Returns the hit in sim coordinates, or null if the ray is
- * parallel to the plane.
+ * Cast a ray from a screen point and intersect it with the ground (y = 0).
+ * Returns the hit in sim coordinates, or null if the ray is parallel to it.
+ *
+ * Everything the player aims at shares this one mapping: planes are drawn
+ * over their ground track (see render/sceneSync.ts), and paths and runways
+ * lie on the ground. So the plane under the finger is the one grabbed, and
+ * the path point lands exactly under the finger.
  *
  * Analytic plane intersection is cheaper than mesh picking and works even
  * when the pointer is off the playfield.
@@ -30,11 +34,10 @@ function screenToWorld(
   state: GameState,
   screenX: number,
   screenY: number,
-  altitude: number,
 ): Vec2 | null {
   const ray = scene.createPickingRay(screenX, screenY, Matrix.Identity(), camera);
   if (Math.abs(ray.direction.y) < 1e-6) return null;
-  const t = (altitude - ray.origin.y) / ray.direction.y;
+  const t = -ray.origin.y / ray.direction.y;
   return fromScene(ray.origin.add(ray.direction.scale(t)), state.world);
 }
 
@@ -75,9 +78,7 @@ export function attachPointerInput(
     const state = getState();
     if (state.phase !== "playing") return;
     const { x, y } = toCanvas(e);
-    // Planes are drawn at FLIGHT_ALTITUDE, so grab-test at that height to
-    // avoid parallax error in the tilted view.
-    const hit = screenToWorld(scene, camera, state, x, y, FLIGHT_ALTITUDE);
+    const hit = screenToWorld(scene, camera, state, x, y);
     const plane = hit && findPlaneNear(state.planes, hit);
     if (!plane) return;
 
@@ -99,8 +100,7 @@ export function attachPointerInput(
       return;
     }
     const { x, y } = toCanvas(e);
-    // Path points live on the ground, where the runways are.
-    const point = screenToWorld(scene, camera, state, x, y, 0);
+    const point = screenToWorld(scene, camera, state, x, y);
     if (point) appendPathPoint(plane, point);
   };
 

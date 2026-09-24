@@ -26,7 +26,7 @@ import { fromScene, toScene } from "./coords";
 import { CLEAR_COLOR } from "./scene";
 
 /** Grid resolution of the grass mesh (per side). Each cell = 2 facets. */
-const GRASS_SUBDIVISIONS = 120;
+const GRASS_SUBDIVISIONS = 40;
 
 /** Grass palette, blended by low-frequency noise. */
 const GRASS_LIGHT = Color3.FromHexString("#7cb84a");

@@ -46,6 +46,16 @@
       </div>
     </div>
 
+    <!-- Toast: short notices such as "BLUE runway open"; fades via opacity -->
+    <div class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
+      <div
+        id="toast"
+        role="status"
+        aria-live="polite"
+        class="rounded-2xl border border-slate-700 bg-slate-900/70 px-6 py-2 text-lg font-black tracking-widest uppercase opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-500"
+      ></div>
+    </div>
+
     <!-- Camera controls (buttons only: every drag on the canvas draws a path) -->
     <div class="absolute right-4 bottom-4 z-10 flex gap-2" aria-label="Camera controls">
       <button id="rotateLeftBtn" class="hud-button" title="Rotate left" aria-label="Rotate left">

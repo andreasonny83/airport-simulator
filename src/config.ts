@@ -13,7 +13,7 @@ import type { RunwayColor } from "./core/types";
 // ---------------------------------------------------------------------------
 
 /** Fixed playfield height; width is `WORLD_HEIGHT * aspectRatio`. */
-export const WORLD_HEIGHT = 100;
+export const WORLD_HEIGHT = 80;
 
 /** Minimum world width required before the third (yellow) runway is added. */
 export const YELLOW_RUNWAY_MIN_WIDTH = 75;
@@ -26,7 +26,7 @@ export const YELLOW_RUNWAY_MIN_WIDTH = 75;
 export const PLANE_RADIUS = 2.2;
 
 /** Cruise speed (units / second). */
-export const PLANE_SPEED = 8;
+export const PLANE_SPEED = 7;
 
 /** Two flying planes closer than this crash. */
 export const COLLISION_DISTANCE = PLANE_RADIUS * 2.2;
@@ -38,7 +38,7 @@ export const WARNING_DISTANCE = COLLISION_DISTANCE * 2.5;
 export const PLANE_GRAB_RADIUS = PLANE_RADIUS * 3;
 
 /** Height planes fly at in the 3D scene (purely visual). */
-export const FLIGHT_ALTITUDE = 1.5;
+export const FLIGHT_ALTITUDE = 3;
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -52,7 +52,7 @@ export const PATH_MIN_SPACING = 1.2;
 // ---------------------------------------------------------------------------
 
 /** Strip size. Long and narrow-ish so it reads as a real runway. */
-export const RUNWAY_LENGTH = 24;
+export const RUNWAY_LENGTH = 40;
 export const RUNWAY_WIDTH = 5;
 
 /** Distance from the runway end to the threshold marker. */
@@ -101,6 +101,29 @@ export const SPAWN_INTERVAL_MIN = 1;
 export const SPAWN_HEADING_JITTER = 0.5;
 
 // ---------------------------------------------------------------------------
+// Progression (onboarding ramp — see core/progression.ts)
+// ---------------------------------------------------------------------------
+
+/** Hard ceiling on simultaneously flying planes, however far the shift goes. */
+export const MAX_AIRBORNE = 8;
+
+/** Each this-many landings allows one more plane in the air. */
+export const LANDINGS_PER_EXTRA_PLANE = 2;
+
+/** Each this-many seconds allows one more plane, so an idle player can't stall. */
+export const SECONDS_PER_EXTRA_PLANE = 45;
+
+/**
+ * Score at which each runway colour starts receiving planes. Runways open in
+ * `RUNWAY_LAYOUT` order; the first one must be 0 so a new shift has a target.
+ */
+export const COLOR_UNLOCK_SCORES: Record<RunwayColor, number> = {
+  red: 0,
+  blue: 3,
+  yellow: 7,
+};
+
+// ---------------------------------------------------------------------------
 // Landscape (purely decorative — the sim never reads any of this)
 // ---------------------------------------------------------------------------
 
@@ -109,13 +132,13 @@ export const SPAWN_HEADING_JITTER = 0.5;
  * centred on the playfield. Square (rather than matching the playfield's
  * aspect) so rotating the camera never reveals an edge on the short axis.
  */
-export const MAP_SCALE = 6;
+export const MAP_SCALE = 5;
 
 /** Fixed seed: the stream and trees look the same on every load and resize. */
 export const SCENERY_SEED = 0x5eed_a1e;
 
 /** Width of the water surface (world units). */
-export const STREAM_WIDTH = 4;
+export const STREAM_WIDTH = 7;
 
 /**
  * Peak deviation of the main meander from the base line. The centreline adds
@@ -130,13 +153,13 @@ export const STREAM_WAVELENGTH = 60;
  * Base line of the stream as a fraction of the world height. 0.5 threads it
  * between the yellow runway (fy 0.3) and the red/blue pair (fy 0.72).
  */
-export const STREAM_BASE_FY = 0.5;
+export const STREAM_BASE_FY = 0;
 
 /** Candidate trees per 1000 units² (before rejection / density thinning). */
-export const TREE_DENSITY = 2.5;
+export const TREE_DENSITY = 0.8;
 
 /** No tree closer than this to any runway edge. */
-export const TREE_RUNWAY_CLEARANCE = 6;
+export const TREE_RUNWAY_CLEARANCE = 8;
 
 /** No tree closer than this to the stream's water edge (≥ canopy radius). */
 export const TREE_STREAM_CLEARANCE = 3;
@@ -149,7 +172,7 @@ export const TREE_STREAM_CLEARANCE = 3;
  * top of the scenery.
  */
 export const TREE_SCALE_MIN = 1.0;
-export const TREE_SCALE_MAX = 1.6;
+export const TREE_SCALE_MAX = 2.5;
 
 /** Fraction of trees that are conifers; the rest are broadleaf. */
 export const TREE_CONIFER_SHARE = 0.35;

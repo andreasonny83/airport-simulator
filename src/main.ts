@@ -5,7 +5,7 @@
  *   core  (state + rules, no DOM)  ←  render / input / ui  ←  main.ts
  */
 import "./style.css";
-import { MAX_DT } from "./config";
+import { COLOR_HEX, MAX_DT } from "./config";
 import { startGame, step, togglePause } from "./core/simulation";
 import { createGameState, resizeWorld } from "./core/state";
 import type { SimEvent } from "./core/types";
@@ -16,8 +16,8 @@ import { createScene } from "./render/scene";
 import { SceneSync } from "./render/sceneSync";
 import { createHud } from "./ui/hud";
 
-/** One press of a rotate button turns the view by 30°. */
-const ROTATE_STEP = Math.PI / 6;
+/** One press of a rotate button turns the view by 15°; presses accumulate. */
+const ROTATE_STEP = Math.PI / 12;
 /** One press of a zoom button scales the view by 25%. */
 const ZOOM_STEP = 1.25;
 
@@ -83,6 +83,9 @@ function handleEvent(event: SimEvent): void {
     case "crash":
       hud.showGameOver(state.score);
       hud.setPhase(state.phase);
+      break;
+    case "unlocked":
+      hud.showToast(`${event.color.toUpperCase()} runway open`, COLOR_HEX[event.color]);
       break;
     case "spawned":
       break;

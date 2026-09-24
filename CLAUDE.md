@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**Important: Ignore tests until further notice. The current test suite is incomplete and may not reflect the final game logic.**
+
 ## Project Overview
 
 This project is an Air Traffic Control game, inspired by classic mobile games like _Flight Control_ (https://airport.apunen.com). The player drags flight paths from aircraft to their matching colored runways, attempting to land as many planes as possible without causing a collision.

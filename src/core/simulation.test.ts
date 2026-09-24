@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createPlane } from "./plane";
+import { flyingCount } from "./progression";
 import { startGame, step, togglePause } from "./simulation";
 import { createGameState } from "./state";
 
@@ -53,6 +54,50 @@ describe("step", () => {
     state.planes = [];
     step(state, state.spawnInterval + 0.001, rng);
     expect(state.planes).toHaveLength(1);
+  });
+});
+
+describe("onboarding", () => {
+  it("keeps a single plane in the air at the start of a shift", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    // Several spawn intervals pass while the first plane is still flying.
+    for (let i = 0; i < 5 * 60; i++) step(state, 1 / 60, rng);
+    expect(state.phase).toBe("playing");
+    expect(flyingCount(state.planes)).toBe(1);
+  });
+
+  it("fills a freed slot on the next step, without a burst", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    for (let i = 0; i < 10; i++) step(state, 1, rng);
+    state.planes = [];
+    step(state, 0.01, rng);
+    expect(state.planes).toHaveLength(1);
+    // The time spent at the cap wasn't banked: no second spawn right away.
+    step(state, 0.01, rng);
+    expect(state.planes).toHaveLength(1);
+  });
+
+  it("only spawns red planes before any landings", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    for (let i = 0; i < 20; i++) {
+      state.planes = [];
+      step(state, state.spawnInterval, rng);
+    }
+    expect(state.planes.every((p) => p.color === "red")).toBe(true);
+  });
+
+  it("announces a runway colour when a landing unlocks it", () => {
+    const state = createGameState(16 / 9);
+    startGame(state, rng);
+    state.score = 2;
+    const runway = state.runways.find((r) => r.color === "red")!;
+    state.planes = [createPlane(99, "red", { ...runway.threshold }, runway.heading)];
+    const events = step(state, 0.01, rng);
+    expect(state.score).toBe(3);
+    expect(events).toContainEqual({ type: "unlocked", color: "blue" });
   });
 });
 

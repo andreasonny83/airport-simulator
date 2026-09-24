@@ -2,15 +2,18 @@
  * The simulation step: the only place game state advances in time.
  *
  * Order matters:
- *   1. spawn   – new planes appear at the edges
+ *   1. spawn   – new planes appear at the edges, but only while fewer are
+ *                flying than the progression cap allows (core/progression.ts)
  *   2. move    – every plane advances by dt
- *   3. land    – planes over a matching threshold start their rollout
+ *   3. land    – planes over a matching threshold start their rollout; a
+ *                landing may open a new runway colour
  *   4. collide – any remaining flying planes that overlap end the game
  *   5. prune   – planes that finished rolling out are removed
  */
 import { checkLanding } from "./landing";
 import { detectCollisions } from "./collision";
 import { updatePlane } from "./plane";
+import { flyingCount, maxAirborne, newlyUnlockedColors } from "./progression";
 import { nextSpawnInterval, spawnPlane } from "./spawner";
 import { resetGameState } from "./state";
 import type { GameState, Rng, SimEvent } from "./types";
@@ -46,10 +49,16 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
   // 1. Spawn. Subtract (rather than zero) the timer so leftover time carries over.
   state.spawnTimer += dt;
   if (state.spawnTimer >= state.spawnInterval) {
-    state.spawnTimer -= state.spawnInterval;
-    const plane = spawnPlane(state, rng);
-    if (plane) events.push({ type: "spawned", planeId: plane.id });
-    state.spawnInterval = nextSpawnInterval(state.spawnInterval, state.score, state.elapsed);
+    if (flyingCount(state.planes) < maxAirborne(state.score, state.elapsed)) {
+      state.spawnTimer -= state.spawnInterval;
+      const plane = spawnPlane(state, rng);
+      if (plane) events.push({ type: "spawned", planeId: plane.id });
+      state.spawnInterval = nextSpawnInterval(state.spawnInterval, state.score, state.elapsed);
+    } else {
+      // At the cap: hold the timer "due" without banking extra time, so a
+      // freed slot fills on the next step but never triggers a burst.
+      state.spawnTimer = state.spawnInterval;
+    }
   }
 
   // 2. Move.
@@ -61,6 +70,9 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
     if (runway) {
       state.score++;
       events.push({ type: "landed", planeId: plane.id, color: runway.color });
+      for (const color of newlyUnlockedColors(state.score - 1, state.score, state.runways)) {
+        events.push({ type: "unlocked", color });
+      }
     }
   }
 
