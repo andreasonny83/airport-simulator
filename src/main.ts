@@ -5,7 +5,7 @@
  *   core  (state + rules, no DOM)  ←  render / input / ui  ←  main.ts
  */
 import "./style.css";
-import { COLOR_HEX, MAX_DT, ROTATE_STEP, ZOOM_STEP } from "./config";
+import { COLOR_HEX, CRASH_OVERLAY_DELAY, MAX_DT, ROTATE_STEP, ZOOM_STEP } from "./config";
 import { startGame, step, togglePause } from "./core/simulation";
 import { createGameState, setViewAspect } from "./core/state";
 import type { SimEvent } from "./core/types";
@@ -34,6 +34,12 @@ const sceneSync = new SceneSync(scene, new MeshFactory(scene), shadows);
 cameraController.setWorld(state.world);
 sceneSync.rebuildWorld(state);
 
+/**
+ * Seconds until the game-over panel appears, while a crash cinematic plays
+ * without it (see `CRASH_OVERLAY_DELAY`); null otherwise.
+ */
+let gameOverIn: number | null = null;
+
 // --- UI + input ----------------------------------------------------------------
 function setPaused(paused: boolean): void {
   if ((state.phase === "paused") !== paused && togglePause(state)) hud.setPhase(state.phase);
@@ -41,6 +47,9 @@ function setPaused(paused: boolean): void {
 
 const hud = createHud(document.body, {
   onStart: () => {
+    // Leave the crash site: the camera glides back to the default view.
+    gameOverIn = null;
+    cameraController.release();
     startGame(state);
     hud.setScore(state.score);
     hud.hideOverlay();
@@ -85,10 +94,15 @@ function handleEvent(event: SimEvent): void {
     case "landed":
       hud.setScore(state.score);
       break;
-    case "crash":
-      hud.showGameOver(state.score);
+    case "crash": {
+      // Wreck the planes, fly the camera over and start the slow orbit. The
+      // game-over panel waits, so nothing covers the fireball.
+      const site = sceneSync.crash(event.planeIds);
+      if (site) cameraController.focusOn(site);
+      gameOverIn = CRASH_OVERLAY_DELAY;
       hud.setPhase(state.phase);
       break;
+    }
     case "unlocked":
       hud.showToast(`${event.color.toUpperCase()} runway open`, COLOR_HEX[event.color]);
       break;
@@ -111,6 +125,10 @@ engine.runRenderLoop(() => {
   if (state.phase !== "paused") time += dt;
 
   for (const event of step(state, dt)) handleEvent(event);
+  if (gameOverIn !== null && (gameOverIn -= dt) <= 0) {
+    gameOverIn = null;
+    hud.showGameOver(state.score);
+  }
 
   cameraController.panBy(panKeys.direction(), dt);
   cameraController.update(dt, aspect());

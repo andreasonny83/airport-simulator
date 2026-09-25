@@ -136,5 +136,8 @@ export const Toast: Story = {
   args: { phase: "playing", score: 3, toast: "BLUE runway open", toastColor: "blue" },
 };
 
-/** Crash overlay with the final score. */
+/**
+ * Crash overlay with the final score. See-through (CRASH_BACKDROP in hud.ts)
+ * so the crash cinematic stays visible above it: see Scene/Gameplay/Crash.
+ */
 export const GameOver: Story = { args: { phase: "gameover", score: 27 } };

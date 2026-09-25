@@ -126,7 +126,11 @@ export function arrivalArrowMarkup(): string {
     </div>`;
 }
 
-/** Start / game-over overlay (the game-over variant is patched in by `showGameOver`). */
+/**
+ * Start / game-over overlay. The game-over variant (text, and a see-through
+ * backdrop so the crash stays visible) is patched in by `showGameOver`; keep
+ * the backdrop classes here in sync with `START_BACKDROP` in hud.ts.
+ */
 export function overlayMarkup(): string {
   return `
     <div

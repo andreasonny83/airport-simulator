@@ -21,10 +21,11 @@ import {
   PLANE_SPEED,
 } from "../config";
 import { angleDelta, lerp, normalizeAngle } from "../core/math";
-import type { GameState, Plane, WorldSize } from "../core/types";
+import type { GameState, Plane, RunwayColor, WorldSize } from "../core/types";
 import { aircraftKindFor, animateAircraft, type AircraftRig } from "./aircraft";
 import { AirfieldFactory, type AirfieldView } from "./airfield";
 import { AirspaceBoundary } from "./boundary";
+import { CrashEffect, type WreckSource } from "./crash";
 import { flightTuning } from "./flightTuning";
 import { headingToRotationY, toScene } from "./coords";
 import { Landscape } from "./landscape";
@@ -66,6 +67,7 @@ function ease(dt: number, tau: number): number {
 interface PlaneView {
   /** The plane's model: root mesh plus its animated parts. */
   aircraft: AircraftRig;
+  color: RunwayColor;
   ring: Mesh;
   /** Green ring on the threshold, briefly, once this plane's path anchors. */
   anchorRing: Mesh;
@@ -94,6 +96,12 @@ export class SceneSync {
   private readonly viewDir = new Vector3(0, -1, 0);
   /** `time` of the previous sync, for frame-to-frame easing. */
   private lastTime: number | null = null;
+  /**
+   * The crash in progress, and the ids of the planes it owns. Their meshes
+   * are moved by the effect, not by `updateView`, until they leave state.
+   */
+  private crashEffect: CrashEffect | null = null;
+  private readonly wreckIds = new Set<number>();
 
   constructor(
     private readonly scene: Scene,
@@ -138,6 +146,8 @@ export class SceneSync {
     const alive = new Set<number>();
     for (const plane of state.planes) {
       alive.add(plane.id);
+      // Wreckage is animated by the crash effect instead (see `crash`).
+      if (this.wreckIds.has(plane.id)) continue;
       let view = this.views.get(plane.id);
       if (!view) {
         const aircraft = this.factory.createAircraft(
@@ -148,6 +158,7 @@ export class SceneSync {
         );
         view = {
           aircraft,
+          color: plane.color,
           ring: this.factory.createWarningRing(`ring-${plane.id}`),
           anchorRing: this.factory.createAnchorRing(`anchor-${plane.id}`),
           anchorAge: null,
@@ -164,8 +175,11 @@ export class SceneSync {
       this.updateView(view, plane, state.world, time, dt);
     }
 
+    this.crashEffect?.update(dt);
+
     for (const [id, view] of this.views) {
       if (alive.has(id)) continue;
+      this.wreckIds.delete(id);
       for (const mesh of view.aircraft.shadowCasters) this.shadows.removeShadowCaster(mesh, false);
       this.factory.disposeAircraft(view.aircraft);
       view.ring.dispose();
@@ -173,6 +187,44 @@ export class SceneSync {
       view.path?.dispose(false, true);
       this.views.delete(id);
     }
+    // The wrecks were cleared away (a new shift): the fire goes out with them.
+    if (this.crashEffect && this.wreckIds.size === 0) {
+      this.crashEffect.dispose();
+      this.crashEffect = null;
+    }
+  }
+
+  /**
+   * Two planes collided: turn them into wrecks. Each plane's mesh freezes
+   * where it's drawn right now and a `CrashEffect` takes over (fireball,
+   * falling wrecks, debris, fire and smoke) until the planes leave state.
+   *
+   * Planes are drawn slid towards the camera (see `placeOverTrack`), which
+   * depends on the view direction; freezing the meshes in 3D is what keeps
+   * the wreckage steady while the camera orbits the site.
+   *
+   * @returns the ground point under the wreckage (scene coordinates), for
+   *          the camera to orbit. It is live: it follows the wrecks as they
+   *          fall and slide. Null if neither plane has a mesh yet.
+   */
+  crash(planeIds: readonly number[]): Vector3 | null {
+    this.crashEffect?.dispose();
+    this.wreckIds.clear();
+    const sources: WreckSource[] = [];
+    for (const id of planeIds) {
+      const view = this.views.get(id);
+      if (!view) continue;
+      this.wreckIds.add(id);
+      view.ring.setEnabled(false);
+      view.anchorRing.setEnabled(false);
+      view.path?.dispose(false, true);
+      view.path = null;
+      sources.push({ rig: view.aircraft, color: view.color });
+    }
+    if (sources.length === 0) return null;
+    const seed = planeIds.reduce((acc, id) => acc * 31 + id, 7);
+    this.crashEffect = new CrashEffect(this.scene, sources, seed, this.shadows);
+    return this.crashEffect.focus;
   }
 
   private updateView(

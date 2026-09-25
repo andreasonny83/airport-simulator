@@ -584,6 +584,34 @@ export const ZOOM_STEP = 1.25;
 export const PAN_SPEED = 1.2;
 
 // ---------------------------------------------------------------------------
+// Crash cinematic (render/camera.ts, render/crash.ts, main.ts)
+// ---------------------------------------------------------------------------
+
+/** Zoom the camera eases to over a crash site (1 = default view). */
+export const CRASH_ZOOM = 3.2;
+
+/**
+ * How far above the centre of the screen the crash site is framed, as a
+ * fraction of the view's half-height: the game-over panel covers the lower
+ * part of the screen, so the wreckage sits in the clear space above it.
+ */
+export const CRASH_FRAME_LIFT = 0.22;
+
+/**
+ * Seconds per full 360° turn of the slow orbit round a crash site. The orbit
+ * speeds up gently from standstill over `CRASH_ORBIT_RAMP` seconds, so the
+ * zoom-in lands first and the turn never starts with a jolt.
+ */
+export const CRASH_ORBIT_PERIOD = 28;
+export const CRASH_ORBIT_RAMP = 2.5;
+
+/**
+ * Seconds between the crash and the game-over panel, so the player sees the
+ * fireball and the wrecks hit the ground before anything covers the view.
+ */
+export const CRASH_OVERLAY_DELAY = 2.4;
+
+// ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
 

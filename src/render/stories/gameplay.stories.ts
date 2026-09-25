@@ -9,14 +9,30 @@
  *               off-screen on their way in, with their arrival arrows. The
  *               sim doesn't run, but the render clock does, so rings pulse
  *               and wind blows.
+ *   - Crash:    two planes flown into each other by the real sim, on a
+ *               loop: the crash cinematic (camera glide, zoom and slow
+ *               orbit) with the fireball, falling wrecks, debris, fire and
+ *               smoke, and the see-through game-over panel on its delay.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
  *
  * Tuning loop: PATH_* / ANCHOR_RING_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
  * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
  * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, ARRIVAL_WARNING…) in config.ts.
+ * Crash: CRASH_ZOOM / CRASH_FRAME_LIFT / CRASH_ORBIT_* / CRASH_OVERLAY_DELAY in config.ts,
+ * WRECK_* / DEBRIS_* / FLASH_* / SCORCH_* / SMOKE_DRIFT and the particle
+ * set-ups in crash.ts, FOCUS_EASE_RATE in camera.ts, CRASH_BACKDROP in
+ * ui/hud.ts.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { COLOR_HEX, ROTATE_STEP, WARNING_DISTANCE, ZOOM_MIN, ZOOM_STEP } from "../../config";
+import {
+  COLOR_HEX,
+  CRASH_OVERLAY_DELAY,
+  PLANE_SPEED,
+  ROTATE_STEP,
+  WARNING_DISTANCE,
+  ZOOM_MIN,
+  ZOOM_STEP,
+} from "../../config";
 import { headingVector, mulberry32 } from "../../core/math";
 import { createPlane } from "../../core/plane";
 import { startGame, step, togglePause } from "../../core/simulation";
@@ -149,6 +165,94 @@ export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
 };
 
 // ---------------------------------------------------------------------------
+// Crash
+// ---------------------------------------------------------------------------
+
+interface CrashArgs {
+  /** Angle between the two planes' headings (180 = head-on). */
+  angleDeg: number;
+  /** Seconds after the crash before the whole thing replays. */
+  replayAfter: number;
+  /** Show the game-over panel (on its CRASH_OVERLAY_DELAY), as in the game. */
+  overlay: boolean;
+  timeScale: number;
+}
+
+/**
+ * Put two planes on a collision course over the middle of the field, about
+ * a second apart, and nothing else in the sky (spawning held off).
+ */
+function stageCrash(state: GameState, angleDeg: number): void {
+  const { world } = state;
+  const meet = { x: world.width * 0.46, y: world.height * 0.34 };
+  // Each plane starts ~1.2 s of flight back along its own course.
+  const back = PLANE_SPEED * 1.2;
+  const half = (angleDeg * DEG) / 2;
+  const headings = [-half, Math.PI + half];
+  const colors = ["red", "blue"] as const;
+  state.planes = headings.map((h, i) => {
+    const dir = headingVector(h);
+    const start = { x: meet.x - dir.x * back, y: meet.y - dir.y * back };
+    return createPlane(state.nextPlaneId++, colors[i]!, start, h);
+  });
+  state.phase = "playing";
+  state.spawnTimer = -1e9; // no other traffic
+}
+
+export const Crash: StoryObj<CrashArgs> = {
+  argTypes: {
+    angleDeg: { control: { type: "range", min: 30, max: 180, step: 5 } },
+    replayAfter: { control: { type: "range", min: 4, max: 40, step: 1 } },
+    timeScale: { control: { type: "range", min: 0.1, max: 2, step: 0.05 } },
+  },
+  args: { angleDeg: 150, replayAfter: 14, overlay: true, timeScale: 1 },
+  render: (args) =>
+    mountStage((stage) => {
+      const cam = gameCamera(stage);
+      const state = createGameState(stage.aspect());
+      const sync = new SceneSync(stage.scene, new MeshFactory(stage.scene), stage.shadows);
+      sync.rebuildWorld(state);
+      const hud = createHud(stage.root, {
+        onStart: () => (sinceCrash = args.replayAfter), // "TRY AGAIN" replays now
+        onTogglePause: () => undefined,
+        onRotate: (dir) => cam.controller.rotateBy(dir * ROTATE_STEP),
+        onZoom: (dir) => cam.controller.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
+      });
+      hud.hideOverlay();
+      stageCrash(state, args.angleDeg);
+
+      let time = 0;
+      /** Seconds since the crash, or null before it. */
+      let sinceCrash: number | null = null;
+      return (dt) => {
+        time += dt;
+        for (const event of step(state, dt)) {
+          if (event.type !== "crash") continue;
+          const site = sync.crash(event.planeIds);
+          if (site) cam.controller.focusOn(site);
+          sinceCrash = 0;
+        }
+        if (sinceCrash !== null) {
+          const before = sinceCrash;
+          sinceCrash += dt;
+          if (args.overlay && before < CRASH_OVERLAY_DELAY && sinceCrash >= CRASH_OVERLAY_DELAY) {
+            hud.showGameOver(state.score);
+          }
+          if (sinceCrash >= args.replayAfter) {
+            // Clear the wreckage (new plane ids) and fly it all again.
+            sinceCrash = null;
+            hud.hideOverlay();
+            cam.controller.release();
+            stageCrash(state, args.angleDeg);
+          }
+        }
+        cam.frame(dt, time);
+        sync.syncPlanes(state, time);
+      };
+    }, args.timeScale),
+};
+
+// ---------------------------------------------------------------------------
 // Live game
 // ---------------------------------------------------------------------------
 
@@ -173,7 +277,11 @@ export const LiveGame: StoryObj<LiveArgs> = {
       const sync = new SceneSync(stage.scene, new MeshFactory(stage.scene), stage.shadows);
       sync.rebuildWorld(state);
 
+      /** Seconds until the game-over panel shows (see main.ts), or null. */
+      let gameOverIn: number | null = null;
       const begin = () => {
+        gameOverIn = null;
+        cam.controller.release();
         startGame(state);
         hud.setScore(state.score);
         hud.hideOverlay();
@@ -196,7 +304,9 @@ export const LiveGame: StoryObj<LiveArgs> = {
         for (const event of step(state, dt)) {
           if (event.type === "landed") hud.setScore(state.score);
           else if (event.type === "crash") {
-            hud.showGameOver(state.score);
+            const site = sync.crash(event.planeIds);
+            if (site) cam.controller.focusOn(site);
+            gameOverIn = CRASH_OVERLAY_DELAY;
             hud.setPhase(state.phase);
           } else if (event.type === "unlocked") {
             hud.showToast(`${event.color.toUpperCase()} runway open`, COLOR_HEX[event.color]);
@@ -206,6 +316,10 @@ export const LiveGame: StoryObj<LiveArgs> = {
               COLOR_HEX[event.color],
             );
           }
+        }
+        if (gameOverIn !== null && (gameOverIn -= dt) <= 0) {
+          gameOverIn = null;
+          hud.showGameOver(state.score);
         }
         cam.frame(dt, time);
         sync.syncPlanes(state, time);

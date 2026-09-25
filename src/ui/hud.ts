@@ -32,6 +32,22 @@ export interface Hud {
 /** How long a toast stays fully visible before fading out (ms). */
 const TOAST_MS = 2500;
 
+/** The start screen's backdrop (as in hudMarkup.ts): dim and blur the map. */
+const START_BACKDROP = ["justify-center", "bg-slate-950/80", "backdrop-blur-md"];
+/**
+ * Game-over backdrop: the crash cinematic keeps orbiting behind it (see
+ * render/camera.ts `focusOn`), so leave the centre of the screen clear and
+ * sit the panel low, over a gradient that only darkens the bottom.
+ */
+const CRASH_BACKDROP = [
+  "justify-end",
+  "pb-[12vh]",
+  "bg-linear-to-t",
+  "from-slate-950/90",
+  "via-slate-950/30",
+  "to-transparent",
+];
+
 /**
  * Inject the HUD markup at the start of `root` (so it stacks above a canvas
  * that follows it) and wire it to `callbacks`.
@@ -83,6 +99,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       title.classList.replace("glow-text", "glow-text-red");
       message.textContent = `You safely landed ${value} aircraft.`;
       startBtn.textContent = "TRY AGAIN";
+      overlay.classList.remove(...START_BACKDROP);
+      overlay.classList.add(...CRASH_BACKDROP);
       overlay.classList.remove("opacity-0", "pointer-events-none");
     },
     setPhase(phase) {
