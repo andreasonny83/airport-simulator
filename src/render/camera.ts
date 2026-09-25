@@ -13,15 +13,12 @@ import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { CAMERA_TILT, PAN_SPEED } from "../config";
-import { viewHalfHeight } from "../core/layout";
+import { CAMERA_TILT, PAN_SPEED, ZOOM_MAX, ZOOM_MIN } from "../config";
+import { panFraction, viewHalfHeight } from "../core/layout";
 import type { Vec2, WorldSize } from "../core/types";
 
 /** Distance from target; with ortho it only needs to clear the scene. */
 const CAMERA_RADIUS = 400;
-/** Lowest zoom shows ~2× the playfield; the landscape map is sized to cover it. */
-const ZOOM_MIN = 0.45;
-const ZOOM_MAX = 5;
 /** How quickly zoom eases towards its target (1 / seconds). */
 const EASE_RATE = 10;
 /** Slower ease for rotation so heading changes glide rather than snap. */
@@ -69,7 +66,7 @@ export class CameraController {
   setWorld(world: WorldSize): void {
     this.world = world;
     // A resize can shrink the field under the current pan: pull it back in.
-    clampToField(this.targetPan, this.world);
+    clampToField(this.targetPan, this.world, this.zoom);
   }
 
   /** Queue a rotation around the vertical axis (radians, eased). */
@@ -93,7 +90,7 @@ export class CameraController {
     const d = this.screenToGround(direction.x * step, direction.y * step);
     this.targetPan.x += d.x;
     this.targetPan.z += d.z;
-    clampToField(this.targetPan, this.world);
+    clampToField(this.targetPan, this.world, this.zoom);
   }
 
   /**
@@ -110,7 +107,7 @@ export class CameraController {
     const target = this.camera.target;
     target.x += d.x;
     target.z += d.z;
-    clampToField(target, this.world);
+    clampToField(target, this.world, this.zoom);
     // Keep the eased goal in lockstep so nothing drifts after release.
     this.targetPan.x = target.x;
     this.targetPan.z = target.z;
@@ -123,11 +120,16 @@ export class CameraController {
     const kZoom = 1 - Math.exp(-EASE_RATE * dt);
     this.camera.alpha += (this.targetAlpha - this.camera.alpha) * kRotate;
     this.zoom += (this.targetZoom - this.zoom) * kZoom;
+    // Zooming out shrinks how far the view may sit off-centre (see
+    // `panFraction`): pull the pan back in as the zoom eases out.
+    clampToField(this.targetPan, this.world, this.zoom);
     // Mutate the target in place: assigning `camera.target` calls setTarget,
     // which rebuilds alpha/beta from the old position and breaks the tilt lock.
     const target = this.camera.target;
     target.x += (this.targetPan.x - target.x) * kZoom;
     target.z += (this.targetPan.z - target.z) * kZoom;
+    // Hard limit too, so the eased pan never lags outside the scenery map.
+    clampToField(target, this.world, this.zoom);
     this.fit(aspect);
   }
 
@@ -156,15 +158,11 @@ export class CameraController {
   }
 
   /**
-   * Size the orthographic frustum so the whole playfield stays visible at
-   * EVERY heading, with a scale that never changes while rotating.
-   *
-   * Fitting the field's rectangle at the current alpha would make the frustum
-   * grow and shrink mid-spin (the rotated rectangle's screen bounding box
-   * changes with heading), which reads as an unwanted zoom. Instead
-   * `viewHalfHeight` fits the field's bounding circle, which projects
-   * identically at any alpha. The sim sizes the airspace from the same
-   * function, so the dashed edge lines up with this view.
+   * Size the orthographic frustum from `viewHalfHeight`, which frames the
+   * airspace at the default heading. The scale depends on the world only,
+   * never on alpha, so rotating never reads as a zoom. The sim sizes the
+   * airspace independently of the view, so the dashed edge always sits
+   * inside it at zoom 1.
    */
   private fit(aspect: number): void {
     const safeAspect = aspect > 0 ? aspect : 1;
@@ -179,12 +177,14 @@ export class CameraController {
 
 /**
  * Keep the centre of the view over the playfield (scene XZ is centred on the
- * field). The landscape is MAP_SCALE× the field's size, so even fully zoomed
- * out over a corner the map edge stays off screen.
+ * field), within `panFraction(zoom)` of its half-size: the full field from
+ * zoom 1 in, nothing at all fully zoomed out. The scenery map is sized for
+ * exactly this (core/scenery.ts `mapBounds`), so its edge stays off screen.
  */
-function clampToField(p: { x: number; z: number }, world: WorldSize): void {
-  const halfW = world.width / 2;
-  const halfH = world.height / 2;
+function clampToField(p: { x: number; z: number }, world: WorldSize, zoom: number): void {
+  const f = panFraction(zoom);
+  const halfW = (world.width / 2) * f;
+  const halfH = (world.height / 2) * f;
   p.x = Math.min(halfW, Math.max(-halfW, p.x));
   p.z = Math.min(halfH, Math.max(-halfH, p.z));
 }

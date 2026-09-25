@@ -3,23 +3,30 @@
  * as in the game:
  *
  *   - Markers:  a frozen moment staged by hand: drawn path lines, a pair of
- *               planes close enough for warning rings, and a path anchored
- *               onto a runway threshold (green ring). The sim doesn't run,
- *               but the render clock does, so rings pulse and wind blows.
+ *               planes close enough for warning rings, a path anchored
+ *               onto a runway threshold (green ring), and two planes still
+ *               off-screen on their way in, with their arrival arrows. The
+ *               sim doesn't run, but the render clock does, so rings pulse
+ *               and wind blows.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
  *
  * Tuning loop: PATH_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
- * colours in meshes.ts, distances in config.ts.
+ * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
+ * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, ARRIVAL_WARNING…) in config.ts.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { COLOR_HEX, ROTATE_STEP, WARNING_DISTANCE, ZOOM_STEP } from "../../config";
-import { headingVector } from "../../core/math";
+import { COLOR_HEX, ROTATE_STEP, WARNING_DISTANCE, ZOOM_MIN, ZOOM_STEP } from "../../config";
+import { headingVector, mulberry32 } from "../../core/math";
 import { createPlane } from "../../core/plane";
 import { startGame, step, togglePause } from "../../core/simulation";
+import { pickSpawn } from "../../core/spawner";
 import { createGameState } from "../../core/state";
 import type { GameState, Plane, Vec2 } from "../../core/types";
 import { attachPointerInput } from "../../input/pointer";
+import { createArrivalArrows } from "../../ui/arrivalArrows";
 import { createHud } from "../../ui/hud";
+import { arrivalLayerMarkup } from "../../ui/hudMarkup";
+import { arrivalMarkers } from "../arrivals";
 import { MeshFactory } from "../meshes";
 import { SceneSync } from "../sceneSync";
 import { gameCamera, mountStage } from "./stage";
@@ -94,13 +101,23 @@ function stageMarkers(state: GameState): void {
   a.warning = b.warning = true;
   planes.push(a, b);
 
+  // Two arrivals, placed exactly as the spawner would (seeded, so the story
+  // is the same every time): still off-screen, so they show as arrows.
+  const rng = mulberry32(11);
+  for (const id of [5, 6]) {
+    const spec = pickSpawn(world, ["red", "blue", "yellow"], rng);
+    const inbound = createPlane(id, spec.color, spec.pos, spec.heading);
+    inbound.inbound = true;
+    planes.push(inbound);
+  }
+
   state.planes = planes;
 }
 
 export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
   argTypes: {
     rotationDeg: { control: { type: "range", min: -180, max: 180, step: 15 } },
-    zoom: { control: { type: "range", min: 0.45, max: 2.5, step: 0.05 } },
+    zoom: { control: { type: "range", min: ZOOM_MIN, max: 2.5, step: 0.05 } },
   },
   args: { rotationDeg: 0, zoom: 1 },
   render: (args) =>
@@ -110,9 +127,12 @@ export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
       const sync = new SceneSync(stage.scene, new MeshFactory(stage.scene), stage.shadows);
       sync.rebuildWorld(state);
       stageMarkers(state);
+      stage.root.insertAdjacentHTML("beforeend", arrivalLayerMarkup());
+      const arrows = createArrivalArrows(stage.root.querySelector<HTMLElement>("#arrivals")!);
       return (dt, time) => {
         cam.frame(dt, time);
         sync.syncPlanes(state, time);
+        arrows.update(arrivalMarkers(state, stage.scene, stage.canvas));
       };
     }),
 };
@@ -184,6 +204,7 @@ export const LiveGame: StoryObj<LiveArgs> = {
         }
         cam.frame(dt, time);
         sync.syncPlanes(state, time);
+        hud.setArrivals(arrivalMarkers(state, stage.scene, stage.canvas));
       };
     }, args.timeScale),
 };

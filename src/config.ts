@@ -17,21 +17,28 @@ export const WORLD_HEIGHT = 100;
 
 /**
  * Tilt of the camera from straight down (radians). 0 = top-down radar view;
- * 0.9 ≈ 52°. Lives here (not in render/camera.ts) because the airspace is
- * sized from the camera's default view (see core/layout.ts `airspaceBounds`).
+ * 0.9 ≈ 52°. Lives here (not in render/camera.ts) because the sim needs it
+ * to work out what the default view shows (see core/layout.ts).
  */
 export const CAMERA_TILT = 0.9;
 
-/** Extra margin around the playfield's bounding circle when fitting the view. */
+/** Extra margin around the airspace when fitting the default view. */
 export const CAMERA_FIT_PADDING = 1.04;
 
 /**
- * The airspace (where planes fly and paths can be drawn) fills the default
- * camera view, inset from every screen edge by this fraction of the view's
- * half-height. The same fraction on all four sides keeps an even on-screen
- * gap whatever the aspect ratio: ~12% ≈ 43 px on a 720 px tall window.
+ * The airspace (where planes fly and paths can be drawn) is the runway field
+ * grown by this much on every side. Measured as seen on screen: the far and
+ * near sides get `AIRSPACE_MARGIN / cos(CAMERA_TILT)` of ground, which the
+ * tilt foreshortens back to the same on-screen gap as the left and right.
+ * The default camera view frames the airspace (see `viewHalfHeight`).
  */
-export const AIRSPACE_SCREEN_INSET = 0.12;
+export const AIRSPACE_MARGIN = 10;
+
+/** Lowest zoom (fully zoomed out). The scenery map is sized to cover it. */
+export const ZOOM_MIN = 0.6;
+
+/** Highest zoom (fully zoomed in). */
+export const ZOOM_MAX = 5;
 
 /** Minimum world width required before the third (yellow) runway is added. */
 export const YELLOW_RUNWAY_MIN_WIDTH = 75;
@@ -264,6 +271,15 @@ export const SPAWN_INTERVAL_MIN = 1;
 /** Max random deviation from "straight inward" for a spawn heading (±0.5 rad). */
 export const SPAWN_HEADING_JITTER = 0.5;
 
+/**
+ * New planes don't pop into view: each one starts off-screen and flies in
+ * across the airspace edge, while an arrow on the screen edge shows where
+ * it's coming from and which way it's heading (see ui/arrivalArrows.ts).
+ * This is how long (seconds) the arrow shows at the default view before
+ * the plane itself flies onto the screen.
+ */
+export const ARRIVAL_WARNING = 2.5;
+
 // ---------------------------------------------------------------------------
 // Progression (onboarding ramp — see core/progression.ts)
 // ---------------------------------------------------------------------------
@@ -292,11 +308,11 @@ export const COLOR_UNLOCK_SCORES: Record<RunwayColor, number> = {
 // ---------------------------------------------------------------------------
 
 /**
- * The scenery map is a square `MAP_SCALE × max(width, height)` on a side,
- * centred on the playfield. Square (rather than matching the playfield's
- * aspect) so rotating the camera never reveals an edge on the short axis.
+ * Extra ground beyond the farthest point the camera can ever show (see
+ * core/scenery.ts `mapBounds`). Covers the frame or two the pan clamp lags
+ * behind a zoom-out.
  */
-export const MAP_SCALE = 5;
+export const MAP_MARGIN = 12;
 
 /** Fixed seed: the stream and trees look the same on every load and resize. */
 export const SCENERY_SEED = 0x5eed_a1e;

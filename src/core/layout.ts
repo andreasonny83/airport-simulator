@@ -6,7 +6,7 @@
  * at fractions of the world size, so they re-flow on every resize.
  */
 import {
-  AIRSPACE_SCREEN_INSET,
+  AIRSPACE_MARGIN,
   CAMERA_FIT_PADDING,
   CAMERA_TILT,
   FLIGHT_ALTITUDE,
@@ -16,6 +16,7 @@ import {
   RUNWAY_WIDTH,
   WORLD_HEIGHT,
   YELLOW_RUNWAY_MIN_WIDTH,
+  ZOOM_MIN,
 } from "../config";
 import { layoutAirfield } from "./airfield";
 import { headingVector } from "./math";
@@ -31,49 +32,72 @@ export function computeWorldSize(aspect: number): WorldSize {
 }
 
 /**
- * Half-height (scene units) of the orthographic view that shows the whole
- * field at zoom 1. The camera divides this by its zoom (render/camera.ts).
+ * The airspace: the runway field grown by `AIRSPACE_MARGIN` on every side.
+ * Paths are clipped to it, planes fly in across its edge (see
+ * core/spawner.ts), and a plane steered past it leaves the world.
  *
- * It fits the field's bounding circle rather than its rectangle, so the
- * scale never changes while the view rotates:
- * - screen X: a ground point `r` from the centre spans at most ±r;
- * - screen Y: ground distance is foreshortened by cos(tilt), and altitude
- *   adds up to FLIGHT_ALTITUDE · sin(tilt).
+ * The far/near margin is stretched by 1 / cos(tilt): the camera
+ * foreshortens ground depth by cos(tilt), so on screen the gap round the
+ * field looks the same on all four sides.
+ */
+export function airspaceBounds(world: WorldSize): Bounds {
+  const mx = AIRSPACE_MARGIN;
+  const my = AIRSPACE_MARGIN / Math.cos(CAMERA_TILT);
+  return { minX: -mx, minY: -my, maxX: world.width + mx, maxY: world.height + my };
+}
+
+/**
+ * Half-height (scene units) of the orthographic view that frames the
+ * airspace at zoom 1 and the default heading. The camera divides this by
+ * its zoom (render/camera.ts).
+ *
+ * - screen X: ground x maps one-to-one;
+ * - screen Y: ground depth is foreshortened by cos(tilt), and altitude
+ *   adds up to FLIGHT_ALTITUDE · sin(tilt) (planes on the far edge).
+ *
+ * It only depends on the world, never on the current heading, so rotating
+ * the view never changes the scale. (Turned away from the default heading,
+ * the airspace's corners can leave the screen; zooming out brings them back.)
  *
  * @param aspect  viewport width / height
  */
 export function viewHalfHeight(world: WorldSize, aspect: number): number {
-  const r = Math.hypot(world.width / 2, world.height / 2);
-  const maxX = r;
-  const maxY = r * Math.cos(CAMERA_TILT) + FLIGHT_ALTITUDE * Math.sin(CAMERA_TILT);
+  const a = airspaceBounds(world);
+  const maxX = (a.maxX - a.minX) / 2;
+  const maxY =
+    ((a.maxY - a.minY) / 2) * Math.cos(CAMERA_TILT) + FLIGHT_ALTITUDE * Math.sin(CAMERA_TILT);
   const safeAspect = aspect > 0 ? aspect : 1;
   return Math.max(maxY, maxX / safeAspect) * CAMERA_FIT_PADDING;
 }
 
 /**
- * The airspace: the ground visible in the default camera view (zoom 1, not
- * rotated), pulled in from every screen edge by `AIRSPACE_SCREEN_INSET`.
- * Paths are clipped to it, planes spawn just outside it, and a plane steered
- * past it leaves the world.
- *
- * Sizing it from the view (rather than a fixed margin round the field) keeps
- * the edge on screen with an even gap on any aspect ratio: 4:3 has little
- * room beside the field, ultrawide and portrait screens have lots.
+ * The patch of ground the default view shows (zoom 1, not rotated or
+ * panned), in sim coordinates. Wider than the airspace on one axis unless
+ * the screen's aspect matches it exactly. Arriving planes start outside it,
+ * so they fly into view instead of popping up.
  *
  * The world's aspect equals the viewport's (see `computeWorldSize`), so the
  * view can be worked out from `world` alone.
  */
-export function airspaceBounds(world: WorldSize): Bounds {
+export function defaultViewBounds(world: WorldSize): Bounds {
   const aspect = world.width / world.height;
   const halfH = viewHalfHeight(world, aspect);
-  const gap = halfH * AIRSPACE_SCREEN_INSET;
-  // Screen X is ground X one-to-one; screen Y is ground depth × cos(tilt).
-  // Never smaller than the field itself.
-  const halfX = Math.max(world.width / 2, halfH * aspect - gap);
-  const halfY = Math.max(world.height / 2, (halfH - gap) / Math.cos(CAMERA_TILT));
+  const halfX = halfH * aspect;
+  const halfY = halfH / Math.cos(CAMERA_TILT);
   const cx = world.width / 2;
   const cy = world.height / 2;
   return { minX: cx - halfX, minY: cy - halfY, maxX: cx + halfX, maxY: cy + halfY };
+}
+
+/**
+ * How far (as a fraction of the field's half-size) the view may be panned
+ * off the field's centre at `zoom`. Full range from zoom 1 in, shrinking
+ * linearly to nothing at `ZOOM_MIN`, where the view is already wide enough.
+ * This keeps the zoomed-out view centred, so the scenery map (see
+ * core/scenery.ts `mapBounds`) needn't stretch to cover a far-panned one.
+ */
+export function panFraction(zoom: number): number {
+  return Math.min(1, Math.max(0, (zoom - ZOOM_MIN) / (1 - ZOOM_MIN)));
 }
 
 /** True if `p` is inside the airspace (edge included). */

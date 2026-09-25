@@ -11,7 +11,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { STREAM_BANK_WIDTH, STREAM_WIDTH } from "../../config";
+import { STREAM_BANK_WIDTH, STREAM_WIDTH, ZOOM_MIN } from "../../config";
 import { createBoatTraffic, stepBoats } from "../../core/boats";
 import { layoutRunways } from "../../core/layout";
 import type { StreamPoint } from "../../core/scenery";
@@ -109,7 +109,7 @@ export const BoatModels: StoryObj<ModelArgs> = {
 interface TrafficArgs {
   /** Camera heading on top of the default view (degrees). */
   rotationDeg: number;
-  /** Camera zoom, as the "+" / "−" buttons set it (0.45–2.5). */
+  /** Camera zoom, as the "+" / "−" buttons set it (ZOOM_MIN–2.5). */
   zoom: number;
   /**
    * Fast-forward, to see launches without waiting. Boats step at most 0.1 s
@@ -126,7 +126,7 @@ interface TrafficArgs {
 export const RiverTraffic: StoryObj<TrafficArgs> = {
   argTypes: {
     rotationDeg: { control: { type: "range", min: -180, max: 180, step: 15 } },
-    zoom: { control: { type: "range", min: 0.45, max: 2.5, step: 0.05 } },
+    zoom: { control: { type: "range", min: ZOOM_MIN, max: 2.5, step: 0.05 } },
     timeScale: { control: { type: "range", min: 0.25, max: 6, step: 0.25 } },
   },
   args: { rotationDeg: 0, zoom: 1, timeScale: 4 },

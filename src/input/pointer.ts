@@ -168,9 +168,14 @@ export function attachPointerInput(
 
     // Paths stop at the edge of the field (see clampPathPoint). Tell the
     // player, once per drag, so the clipped line doesn't look broken.
+    // An inbound plane grabbed before it has flown in starts outside, so the
+    // pointer does too: that's not a path hitting the edge. The border still
+    // shows (it's where the path can start), but hold the notice until the
+    // path has begun.
     const pastEdge = !isInAirspace(hit, state.world);
+    const flyingIn = plane.inbound && plane.path.length === 0;
     setOutside(e.pointerId, pastEdge);
-    if (pastEdge && !warned.has(e.pointerId)) {
+    if (pastEdge && !flyingIn && !warned.has(e.pointerId)) {
       warned.add(e.pointerId);
       feedback.onEdgeBlocked?.(plane);
     }

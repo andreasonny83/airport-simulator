@@ -11,6 +11,7 @@ import { createGameState, resizeWorld } from "./core/state";
 import type { SimEvent } from "./core/types";
 import { attachPanKeys } from "./input/keyboard";
 import { attachPointerInput } from "./input/pointer";
+import { arrivalMarkers } from "./render/arrivals";
 import { CameraController } from "./render/camera";
 import { MeshFactory } from "./render/meshes";
 import { createScene } from "./render/scene";
@@ -121,6 +122,8 @@ engine.runRenderLoop(() => {
   cameraController.update(dt, aspect());
   sceneSync.syncPlanes(state, time);
   scene.render();
+  // After render, so the arrows use this frame's camera matrices.
+  hud.setArrivals(arrivalMarkers(state, scene, canvas));
 });
 
 // Expose state for debugging / automated browser checks in dev builds only.

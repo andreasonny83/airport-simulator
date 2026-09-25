@@ -1,9 +1,10 @@
 /**
  * HTML HUD layered over the canvas: score, start/game-over overlay, pause
- * button, toast notices and the camera buttons. Markup lives in
+ * button, toast notices, arrival arrows and the camera buttons. Markup lives in
  * hudMarkup.ts (shared with Storybook); this module injects and wires it up.
  */
 import type { GamePhase } from "../core/types";
+import { createArrivalArrows, type ArrivalMarker } from "./arrivalArrows";
 import { hudMarkup } from "./hudMarkup";
 
 export interface HudCallbacks {
@@ -24,6 +25,8 @@ export interface Hud {
   setPhase(phase: GamePhase): void;
   /** Briefly show a notice at the top of the screen, optionally tinted. */
   showToast(text: string, color?: string): void;
+  /** Arrows on the screen edge for planes about to fly in (call every frame). */
+  setArrivals(markers: readonly ArrivalMarker[]): void;
 }
 
 /** How long a toast stays fully visible before fading out (ms). */
@@ -50,6 +53,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const pauseBtn = byId<HTMLButtonElement>("pauseBtn");
   const pausedBanner = byId("pausedBanner");
   const toast = byId("toast");
+  const arrivals = createArrivalArrows(
+    byId("arrivals"),
+    Array.from(root.querySelectorAll<HTMLElement>("[data-arrow-avoid]")),
+  );
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   startBtn.addEventListener("click", callbacks.onStart);
@@ -97,6 +104,9 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // A newer toast replaces the old one and restarts the clock.
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toast.classList.add("opacity-0"), TOAST_MS);
+    },
+    setArrivals(markers) {
+      arrivals.update(markers);
     },
   };
 }

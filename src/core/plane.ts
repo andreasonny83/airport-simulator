@@ -34,6 +34,7 @@ export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: 
     warning: false,
     pathAnchored: false,
     canDepart: true,
+    inbound: false,
   };
 }
 
@@ -87,6 +88,8 @@ function updateFlying(plane: Plane, dt: number, world: WorldSize): void {
     }
     steer(plane, desired ?? plane.heading, h);
     moveForward(plane, PLANE_SPEED * h);
+    // Arrived: the plane is now in play like any other.
+    if (plane.inbound && isInAirspace(plane.pos, world)) plane.inbound = false;
   }
 }
 
@@ -132,10 +135,13 @@ function updateDeparting(plane: Plane, dt: number, world: WorldSize): void {
  * - Without one: if the plane has drifted off the field on its own, head
  *   back towards the middle with a smooth U-turn. (Planes the player steers
  *   out never get here: they switch to `departing`, see `updateFlying`.)
+ * - Inbound planes are still outside on purpose, on a track the spawner
+ *   aimed across the airspace edge: they carry straight on.
  */
 function desiredHeading(plane: Plane, world: WorldSize): number | null {
   const target = nextWaypoint(plane);
   if (target) return Math.atan2(target.y - plane.pos.y, target.x - plane.pos.x);
+  if (plane.inbound) return null;
 
   const b = airspaceBounds(world);
   const m = PLANE_RADIUS;

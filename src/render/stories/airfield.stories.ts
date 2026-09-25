@@ -4,13 +4,19 @@
  *
  * Tuning loop: runway markings/lights live in runway.ts, taxiways and
  * hangars in airfield.ts, the layout and sizes in config.ts (RUNWAY_*,
- * TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, MAP_SCALE), colours in
- * landscape.ts. Save and the story rebuilds. Boats have their own stories
+ * TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, AIRSPACE_MARGIN,
+ * MAP_MARGIN, ZOOM_MIN), colours in landscape.ts. Save and the story rebuilds. Boats have their own stories
  * in "Scene/River".
  */
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { COLOR_HEX, RUNWAY_LENGTH, RUNWAY_THRESHOLD_INSET, RUNWAY_WIDTH } from "../../config";
+import {
+  COLOR_HEX,
+  RUNWAY_LENGTH,
+  RUNWAY_THRESHOLD_INSET,
+  RUNWAY_WIDTH,
+  ZOOM_MIN,
+} from "../../config";
 import { layoutAirfield } from "../../core/airfield";
 import { layoutRunways } from "../../core/layout";
 import { headingVector } from "../../core/math";
@@ -28,7 +34,7 @@ const DEG = Math.PI / 180;
 interface AirfieldArgs {
   /** Camera heading on top of the default view (degrees). */
   rotationDeg: number;
-  /** Camera zoom, as the "+" / "−" buttons set it (0.45–2.5). */
+  /** Camera zoom, as the "+" / "−" buttons set it (ZOOM_MIN–2.5). */
   zoom: number;
   /** Show the airspace edge (normally only visible while a drag pushes past it). */
   showBoundary: boolean;
@@ -99,7 +105,7 @@ export const SingleRunway: StoryObj<RunwayArgs> = {
 
 const fieldArgTypes = {
   rotationDeg: { control: { type: "range", min: -180, max: 180, step: 15 } },
-  zoom: { control: { type: "range", min: 0.45, max: 2.5, step: 0.05 } },
+  zoom: { control: { type: "range", min: ZOOM_MIN, max: 2.5, step: 0.05 } },
 } as const;
 
 /**

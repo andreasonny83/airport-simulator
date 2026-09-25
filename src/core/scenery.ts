@@ -7,11 +7,11 @@
  * here can affect spawning, collisions or landing.
  *
  * Everything is in sim coordinates (origin at the playfield's top-left,
- * +y towards the player). The map extends well past the playfield so the
- * camera can zoom out / rotate without showing the void.
+ * +y towards the player). The map extends just far enough past the
+ * playfield that the camera can zoom out / rotate without showing the void.
  */
 import {
-  MAP_SCALE,
+  MAP_MARGIN,
   SCENERY_SEED,
   STREAM_AIRFIELD_CLEARANCE,
   STREAM_BANK_WIDTH,
@@ -26,7 +26,9 @@ import {
   TREE_SCALE_MAX,
   TREE_SCALE_MIN,
   TREE_STREAM_CLEARANCE,
+  ZOOM_MIN,
 } from "../config";
+import { defaultViewBounds } from "./layout";
 import { headingVector, lerp, mulberry32 } from "./math";
 import type { OrientedRect, Rng, Runway, Vec2, WorldSize } from "./types";
 
@@ -87,11 +89,24 @@ const STREAM_MAX_SHIFT = 150;
 // ---------------------------------------------------------------------------
 
 /**
- * Scenery map bounds: a square `MAP_SCALE × max(width, height)` on a side,
- * centred on the playfield.
+ * Scenery map bounds: the smallest square, centred on the playfield, that
+ * the camera can never see past.
+ *
+ * At zoom `z` the view shows the ground within `R / z` of its centre at any
+ * heading, where `R` is the default view's half-diagonal on the ground.
+ * That centre can be panned up to `panFraction(z)` of the field's
+ * half-diagonal `D` off the middle (see render/camera.ts). The sum is
+ * largest at one of the two ends of the range where panning scales:
+ * - zoom 1:          D + R (full pan, default view);
+ * - zoom `ZOOM_MIN`: R / ZOOM_MIN (no pan, widest view).
+ * Past zoom 1 the view only shrinks, and in between both terms are
+ * smaller than at one of the ends. `MAP_MARGIN` is added on top.
  */
 export function mapBounds(world: WorldSize): Bounds {
-  const half = (MAP_SCALE * Math.max(world.width, world.height)) / 2;
+  const v = defaultViewBounds(world);
+  const r = Math.hypot(v.maxX - v.minX, v.maxY - v.minY) / 2;
+  const d = Math.hypot(world.width, world.height) / 2;
+  const half = Math.max(d + r, r / ZOOM_MIN) + MAP_MARGIN;
   const cx = world.width / 2;
   const cy = world.height / 2;
   return { minX: cx - half, minY: cy - half, maxX: cx + half, maxY: cy + half };

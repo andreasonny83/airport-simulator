@@ -89,6 +89,13 @@ export interface Plane {
    * False for a shift's opening plane, which must be landed.
    */
   canDepart: boolean;
+  /**
+   * True from the spawn until the plane first crosses into the airspace.
+   * New planes start off-screen and fly straight in (see core/spawner.ts);
+   * meanwhile the HUD shows an arrow on the screen edge, and the plane
+   * can't collide (nobody could see it coming) or be given a path.
+   */
+  inbound: boolean;
 }
 
 /**

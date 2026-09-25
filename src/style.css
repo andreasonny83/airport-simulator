@@ -37,4 +37,22 @@
       bg-slate-800/80 text-xl font-bold text-slate-200 shadow-lg backdrop-blur-sm
       transition hover:bg-slate-700 active:scale-95;
   }
+
+  /* Arrival arrow (hudMarkup.ts): the ring pulses outward to catch the eye. */
+  .arrival-ring {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: arrival-pulse 1s ease-out infinite;
+  }
+}
+
+@keyframes arrival-pulse {
+  from {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
 }

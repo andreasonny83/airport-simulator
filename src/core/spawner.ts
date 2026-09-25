@@ -1,63 +1,158 @@
 /**
  * Plane spawning and the difficulty curve.
  */
-import { PLANE_RADIUS, SPAWN_HEADING_JITTER, WARNING_DISTANCE } from "../config";
-import { airspaceBounds } from "./layout";
-import { distance } from "./math";
+import {
+  ARRIVAL_WARNING,
+  CAMERA_TILT,
+  FLIGHT_ALTITUDE,
+  PLANE_RADIUS,
+  PLANE_SPEED,
+  SPAWN_HEADING_JITTER,
+  WARNING_DISTANCE,
+} from "../config";
+import { airspaceBounds, defaultViewBounds } from "./layout";
+import { distance, headingVector } from "./math";
 import { createPlane } from "./plane";
 import { unlockedColors } from "./progression";
+import type { Bounds } from "./scenery";
 import type { GameState, Plane, Rng, RunwayColor, Vec2, WorldSize } from "./types";
 
 export interface SpawnSpec {
   color: RunwayColor;
+  /** Start point, off-screen at the default view. */
   pos: Vec2;
   heading: number;
+  /** Where the straight track crosses into the airspace. */
+  entry: Vec2;
+  /** Distance from `pos` to `entry` (world units). */
+  runIn: number;
 }
 
 /**
- * Pick a random colour, screen edge and inward heading for a new plane.
- * Planes appear just outside the airspace (one radius beyond its edge).
+ * How far past the default view's edge a plane must start to be fully out
+ * of sight: its own size, plus its altitude, which lifts it up the screen
+ * (a plane just past the near edge would otherwise peek in).
+ */
+const OFFSCREEN_MARGIN = PLANE_RADIUS * 2 + FLIGHT_ALTITUDE * Math.tan(CAMERA_TILT);
+
+/**
+ * Pick a random colour, airspace edge (see `edgeWeights`) and inward track
+ * for a new plane.
+ *
+ * The track crosses the airspace edge at `entry`, somewhere along the
+ * field's side, heading roughly inward. The plane starts back along that
+ * track, off-screen at the default view: `ARRIVAL_WARNING` seconds of
+ * flight beyond the point where it comes into sight. So it flies in from
+ * the screen edge rather than appearing out of nowhere, and its arrow
+ * shows for the same time whichever side it comes from.
  */
 export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng: Rng): SpawnSpec {
   const color = colors[Math.floor(rng() * colors.length)] ?? colors[0] ?? "red";
-  const edge = Math.floor(rng() * 4); // 0 top, 1 right, 2 bottom, 3 left
+  const edge = pickEdge(edgeWeights(world), rng()); // 0 top, 1 right, 2 bottom, 3 left
   const along = rng();
   const jitter = (rng() - 0.5) * 2 * SPAWN_HEADING_JITTER;
-  const r = PLANE_RADIUS;
-  // Enter across the airspace edge, but aimed at the runway field: `along`
-  // spans the field's side, not the (wider) airspace's.
+  // Cross the airspace edge, but aimed at the runway field: `along` spans
+  // the field's side, not the (wider) airspace's.
   const b = airspaceBounds(world);
 
+  let entry: Vec2;
+  let heading: number;
   switch (edge) {
     case 0:
-      return {
-        color,
-        pos: { x: along * world.width, y: b.minY - r },
-        heading: Math.PI / 2 + jitter,
-      };
+      entry = { x: along * world.width, y: b.minY };
+      heading = Math.PI / 2 + jitter;
+      break;
     case 1:
-      return {
-        color,
-        pos: { x: b.maxX + r, y: along * world.height },
-        heading: Math.PI + jitter,
-      };
+      entry = { x: b.maxX, y: along * world.height };
+      heading = Math.PI + jitter;
+      break;
     case 2:
-      return {
-        color,
-        pos: { x: along * world.width, y: b.maxY + r },
-        heading: -Math.PI / 2 + jitter,
-      };
+      entry = { x: along * world.width, y: b.maxY };
+      heading = -Math.PI / 2 + jitter;
+      break;
     default:
-      return { color, pos: { x: b.minX - r, y: along * world.height }, heading: jitter };
+      entry = { x: b.minX, y: along * world.height };
+      heading = jitter;
   }
+
+  const dir = headingVector(heading);
+  const back = { x: -dir.x, y: -dir.y };
+  const hidden = grow(defaultViewBounds(world), OFFSCREEN_MARGIN);
+  const runIn = exitDistance(entry, back, hidden) + ARRIVAL_WARNING * PLANE_SPEED;
+  return {
+    color,
+    pos: { x: entry.x + back.x * runIn, y: entry.y + back.y * runIn },
+    heading,
+    entry,
+    runIn,
+  };
 }
 
-/** How many times to re-roll a spawn that lands on top of another plane. */
+/**
+ * How likely each edge (top, right, bottom, left) is to get the next plane:
+ * its length divided by how long a plane takes to fly in from it.
+ *
+ * - Length: arrivals spread evenly round the field, so long sides get more.
+ * - Time: the default view shows more ground beyond some edges than others
+ *   (the tilt squashes depth, so above and below, most on portrait screens).
+ *   Planes from there spend longer flying in before the player can route
+ *   them, so those edges get proportionally fewer.
+ *
+ * On 16:9 the two roughly cancel out (about even odds, as before). On
+ * portrait, about 5 in 6 planes come from the sides; on ultrawide, the long
+ * top and bottom get a few more.
+ */
+export function edgeWeights(world: WorldSize): [number, number, number, number] {
+  const b = airspaceBounds(world);
+  const v = defaultViewBounds(world);
+  // Straight-in time: the off-screen run-in, then across the visible gap
+  // between the view edge and the airspace.
+  const time = (gap: number) => (gap + OFFSCREEN_MARGIN) / PLANE_SPEED + ARRIVAL_WARNING;
+  return [
+    world.width / time(b.minY - v.minY),
+    world.height / time(v.maxX - b.maxX),
+    world.width / time(v.maxY - b.maxY),
+    world.height / time(b.minX - v.minX),
+  ];
+}
+
+/** Index into `weights`, chosen with probability proportional to its weight. */
+function pickEdge(weights: readonly number[], r: number): number {
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let t = r * total;
+  for (let i = 0; i < weights.length - 1; i++) {
+    t -= weights[i]!;
+    if (t < 0) return i;
+  }
+  return weights.length - 1;
+}
+
+function grow(b: Bounds, by: number): Bounds {
+  return { minX: b.minX - by, minY: b.minY - by, maxX: b.maxX + by, maxY: b.maxY + by };
+}
+
+/**
+ * Distance from `p` (inside `b`) along unit vector `d` to the edge of `b`:
+ * the nearest of the two walls the ray heads for. 0 if `p` is outside.
+ */
+function exitDistance(p: Vec2, d: Vec2, b: Bounds): number {
+  if (p.x < b.minX || p.x > b.maxX || p.y < b.minY || p.y > b.maxY) return 0;
+  let t = Infinity;
+  if (d.x > 0) t = Math.min(t, (b.maxX - p.x) / d.x);
+  if (d.x < 0) t = Math.min(t, (b.minX - p.x) / d.x);
+  if (d.y > 0) t = Math.min(t, (b.maxY - p.y) / d.y);
+  if (d.y < 0) t = Math.min(t, (b.minY - p.y) / d.y);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** How many times to re-roll a spawn that would crowd another plane. */
 const SPAWN_ATTEMPTS = 5;
 
 /**
  * Add a new plane to `state`, only using colours whose runway exists and
- * has been unlocked at the current score (see `unlockedColors`). Re-rolls a few times to avoid spawning into an instant crash.
+ * has been unlocked at the current score (see `unlockedColors`). The plane
+ * starts `inbound`: off-screen, flying straight in. Re-rolls a few times to
+ * keep new arrivals from bunching up with other planes.
  *
  * @returns the new plane, or null if there are no runways.
  */
@@ -66,17 +161,40 @@ export function spawnPlane(state: GameState, rng: Rng): Plane | null {
   if (colors.length === 0) return null;
 
   let spec = pickSpawn(state.world, colors, rng);
-  for (let i = 1; i < SPAWN_ATTEMPTS && isCrowded(spec.pos, state.planes); i++) {
+  for (let i = 1; i < SPAWN_ATTEMPTS && isCrowded(spec, state.planes); i++) {
     spec = pickSpawn(state.world, colors, rng);
   }
 
   const plane = createPlane(state.nextPlaneId++, spec.color, spec.pos, spec.heading);
+  plane.inbound = true;
   state.planes.push(plane);
   return plane;
 }
 
-function isCrowded(pos: Vec2, planes: readonly Plane[]): boolean {
-  return planes.some((p) => p.phase === "flying" && distance(p.pos, pos) < WARNING_DISTANCE);
+/**
+ * True if the new plane would start near another flying plane, or pass
+ * near another inbound one on the way in. Inbound planes can't collide (see
+ * core/collision.ts), but two arriving on top of each other would be an
+ * unfair crash the moment they cross into the airspace. Both fly straight
+ * at the same speed until then, so their closest approach has a closed form.
+ */
+function isCrowded(spec: SpawnSpec, planes: readonly Plane[]): boolean {
+  const dir = headingVector(spec.heading);
+  const duration = spec.runIn / PLANE_SPEED;
+  return planes.some((p) => {
+    if (p.phase !== "flying") return false;
+    if (distance(p.pos, spec.pos) < WARNING_DISTANCE) return true;
+    if (!p.inbound) return false;
+    // Relative position and velocity of the new plane w.r.t. `p`.
+    const other = headingVector(p.heading);
+    const rx = spec.pos.x - p.pos.x;
+    const ry = spec.pos.y - p.pos.y;
+    const vx = (dir.x - other.x) * PLANE_SPEED;
+    const vy = (dir.y - other.y) * PLANE_SPEED;
+    const vv = vx * vx + vy * vy;
+    const t = vv > 0 ? Math.min(duration, Math.max(0, -(rx * vx + ry * vy) / vv)) : 0;
+    return Math.hypot(rx + vx * t, ry + vy * t) < WARNING_DISTANCE;
+  });
 }
 
 /**

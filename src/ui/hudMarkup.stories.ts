@@ -6,7 +6,9 @@
  * toast) are forced visible here.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
+import { createArrivalArrows } from "./arrivalArrows";
 import {
+  arrivalLayerMarkup,
   cameraControlsMarkup,
   overlayMarkup,
   pauseButtonMarkup,
@@ -80,3 +82,34 @@ export const Toast: StoryObj<{ text: string; color: string }> = {
 export const CameraControls: Story = { render: () => stage(cameraControlsMarkup()) };
 
 export const Overlay: Story = { render: () => stage(overlayMarkup()) };
+
+/**
+ * One arrival arrow (`arrivalArrowMarkup`), drawn by the real
+ * arrivalArrows.ts, in the middle of the screen so it's easy to inspect.
+ * In the game it sits on the screen edge where a plane is about to fly in,
+ * pointing along its track, in its runway colour.
+ */
+export const ArrivalArrow: StoryObj<{ color: string; angleDeg: number }> = {
+  args: { color: "#3b82f6", angleDeg: 30 },
+  argTypes: {
+    color: { control: "color" },
+    angleDeg: { control: { type: "range", min: -180, max: 180, step: 5 } },
+  },
+  render: ({ color, angleDeg }) => {
+    const root = stage(arrivalLayerMarkup());
+    // The layer has no size until Storybook attaches `root`: place the arrow then.
+    requestAnimationFrame(() => {
+      const layer = part(root, "arrivals");
+      createArrivalArrows(layer).update([
+        {
+          id: 1,
+          color,
+          x: layer.clientWidth / 2,
+          y: layer.clientHeight / 2,
+          angle: (angleDeg * Math.PI) / 180,
+        },
+      ]);
+    });
+    return root;
+  },
+};

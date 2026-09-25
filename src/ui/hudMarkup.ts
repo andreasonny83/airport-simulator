@@ -15,6 +15,7 @@ export function scorePanelMarkup(): string {
   return `
     <div class="pointer-events-none absolute top-4 left-4 z-10">
       <div
+        data-arrow-avoid
         class="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 shadow-lg backdrop-blur-sm"
       >
         <span class="text-sm font-bold tracking-wider text-slate-400 uppercase">Landed</span>
@@ -29,6 +30,7 @@ export function pauseButtonMarkup(): string {
     <div class="absolute top-4 right-4 z-10">
       <button
         id="pauseBtn"
+        data-arrow-avoid
         class="hud-button hidden"
         title="Pause (P / Esc)"
         aria-label="Pause"
@@ -71,7 +73,11 @@ export function toastMarkup(): string {
 /** Camera controls (buttons only: every drag on the canvas draws a path). */
 export function cameraControlsMarkup(): string {
   return `
-    <div class="absolute right-4 bottom-4 z-10 flex gap-2" aria-label="Camera controls">
+    <div
+      data-arrow-avoid
+      class="absolute right-4 bottom-4 z-10 flex gap-2"
+      aria-label="Camera controls"
+    >
       <button id="rotateLeftBtn" class="hud-button" title="Rotate left" aria-label="Rotate left">
         ⟲
       </button>
@@ -80,6 +86,43 @@ export function cameraControlsMarkup(): string {
       </button>
       <button id="zoomOutBtn" class="hud-button" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoomInBtn" class="hud-button" title="Zoom in" aria-label="Zoom in">+</button>
+    </div>`;
+}
+
+/**
+ * Layer for arrival arrows (see arrivalArrows.ts). Below the other HUD
+ * panels; arrows slide out from under any element marked
+ * `data-arrow-avoid` (score, pause, camera buttons), so neither hides the other.
+ */
+export function arrivalLayerMarkup(): string {
+  return `
+    <div
+      id="arrivals"
+      class="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
+      aria-hidden="true"
+    ></div>`;
+}
+
+/**
+ * One arrival arrow, pinned to the screen edge where an off-screen plane
+ * will fly in. Drawn pointing right (+x); `arrivalArrows.ts` positions the
+ * wrapper and rotates the SVG to the plane's direction of travel, and sets
+ * `color` to the plane's runway colour (the SVG paints in currentColor).
+ */
+export function arrivalArrowMarkup(): string {
+  return `
+    <div class="arrival-arrow absolute top-0 left-0 -mt-6 -ml-6 h-12 w-12 drop-shadow-lg">
+      <svg viewBox="-24 -24 48 48" class="h-full w-full overflow-visible">
+        <circle class="arrival-ring" r="17" fill="none" stroke="currentColor" stroke-width="3" />
+        <circle r="14" fill="#0f172a" fill-opacity="0.55" />
+        <path
+          d="M 13 0 L 2 -10 L 2 -4 L -11 -4 L -11 4 L 2 4 L 2 10 Z"
+          fill="currentColor"
+          stroke="#f8fafc"
+          stroke-width="1.8"
+          stroke-linejoin="round"
+        />
+      </svg>
     </div>`;
 }
 
@@ -109,6 +152,7 @@ export function overlayMarkup(): string {
 /** The whole HUD, in stacking order (the overlay last, on top). */
 export function hudMarkup(): string {
   return [
+    arrivalLayerMarkup(),
     scorePanelMarkup(),
     pauseButtonMarkup(),
     pausedBannerMarkup(),

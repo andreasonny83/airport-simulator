@@ -3,8 +3,9 @@
  *
  * These stories mount the same module the game uses, so what you see here is
  * what ships. Buttons log their callbacks to the Actions panel instead of
- * driving a game. Tweak classes in hudMarkup.ts, the glow/button styles in
- * style.css, or `TOAST_MS` in hud.ts, and the story hot-reloads.
+ * driving a game. Tweak classes in hudMarkup.ts, the glow/button/arrow
+ * styles in style.css, `TOAST_MS` in hud.ts or `AVOID_RADIUS` in
+ * arrivalArrows.ts, and the story hot-reloads.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import { fn } from "storybook/test";
@@ -19,7 +20,26 @@ interface HudArgs extends HudCallbacks {
   toast: string;
   /** Runway colour to tint the toast with, or "none" for the default white. */
   toastColor: RunwayColor | "none";
+  /** Show sample arrival arrows round the screen edge. */
+  arrivals: boolean;
 }
+
+/**
+ * Sample arrival arrows, one per edge, as fractions of the screen. The
+ * top-left and bottom-right ones land under the score panel and camera
+ * buttons, so they show arrows sliding out from under the HUD.
+ */
+const SAMPLE_ARRIVALS: ReadonlyArray<{ color: RunwayColor; fx: number; fy: number; deg: number }> =
+  [
+    { color: "red", fx: 0.04, fy: 0, deg: 70 },
+    { color: "blue", fx: 0.55, fy: 0, deg: 100 },
+    { color: "yellow", fx: 1, fy: 0.45, deg: 170 },
+    { color: "blue", fx: 0, fy: 0.6, deg: -10 },
+    { color: "red", fx: 0.95, fy: 1, deg: -120 },
+  ];
+
+/** Arrow inset from the screen edge, matching render/arrivals.ts EDGE_INSET. */
+const ARROW_INSET = 34;
 
 /** Full-window stage matching the game's `<body>`. */
 function stage(): HTMLElement {
@@ -39,11 +59,31 @@ function applyArgs(hud: Hud, args: HudArgs): void {
   }
 }
 
+/** Place the sample arrows once `root` is on the page and has a size. */
+function showSampleArrivals(hud: Hud, root: HTMLElement): void {
+  requestAnimationFrame(() => {
+    const w = root.clientWidth;
+    const h = root.clientHeight;
+    const pin = (v: number, max: number) => Math.min(max - ARROW_INSET, Math.max(ARROW_INSET, v));
+    hud.setArrivals(
+      SAMPLE_ARRIVALS.map((a, i) => ({
+        id: i,
+        color: COLOR_HEX[a.color],
+        x: pin(a.fx * w, w),
+        y: pin(a.fy * h, h),
+        angle: (a.deg * Math.PI) / 180,
+      })),
+    );
+  });
+}
+
 const meta: Meta<HudArgs> = {
   title: "HUD/Screens",
   render: (args) => {
     const root = stage();
-    applyArgs(createHud(root, args), args);
+    const hud = createHud(root, args);
+    applyArgs(hud, args);
+    if (args.arrivals) showSampleArrivals(hud, root);
     return root;
   },
   argTypes: {
@@ -61,6 +101,7 @@ const meta: Meta<HudArgs> = {
     score: 0,
     toast: "",
     toastColor: "none",
+    arrivals: false,
     onStart: fn(),
     onTogglePause: fn(),
     onRotate: fn(),
@@ -76,6 +117,13 @@ export const StartScreen: Story = {};
 
 /** Mid-shift: score, pause button and camera controls. */
 export const Playing: Story = { args: { phase: "playing", score: 12 } };
+
+/**
+ * Arrival arrows on the screen edge, as planes are about to fly in. Arrows
+ * that would sit under the score panel or camera buttons slide clear of them
+ * (`data-arrow-avoid` in hudMarkup.ts).
+ */
+export const Arrivals: Story = { args: { phase: "playing", score: 8, arrivals: true } };
 
 /** Paused banner over the (frozen) game. */
 export const Paused: Story = { args: { phase: "paused", score: 12 } };
