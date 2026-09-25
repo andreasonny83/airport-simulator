@@ -41,9 +41,9 @@ import { groundPad, mountStage, orbitCamera, type Stage } from "./stage";
 const meta: Meta = { title: "Scene/Countryside" };
 export default meta;
 
-/** The game's world for a 16:9 screen, with everything on it. */
+/** The game's (fixed-size) world, with everything on it. */
 function buildWorld(stage: Stage): { world: WorldSize; update: (time: number) => void } {
-  const world = computeWorldSize(16 / 9);
+  const world = computeWorldSize();
   const runways = layoutRunways(world);
   const factory = new MeshFactory(stage.scene);
   fitShadowsToWorld(stage.shadows, world);

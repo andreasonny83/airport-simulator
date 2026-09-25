@@ -183,9 +183,9 @@ const fieldArgTypes = {
 } as const;
 
 /**
- * Runways, taxiways and hangars as laid out for this canvas's aspect ratio
- * (resize the preview or pick a Storybook viewport to see the 2- vs
- * 3-runway layouts), on bare grass.
+ * Runways, taxiways and hangars as laid out on the fixed-size world (see
+ * `WORLD_ASPECT`), on bare grass. Resizing the preview only refits the
+ * camera round it, like the game.
  */
 export const RunwayLayout: StoryObj<AirfieldArgs> = {
   argTypes: fieldArgTypes,

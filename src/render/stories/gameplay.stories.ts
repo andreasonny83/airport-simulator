@@ -106,7 +106,7 @@ function stageMarkers(state: GameState): void {
   // is the same every time): still off-screen, so they show as arrows.
   const rng = mulberry32(11);
   for (const id of [5, 6]) {
-    const spec = pickSpawn(world, ["red", "blue", "yellow"], rng);
+    const spec = pickSpawn(world, state.viewAspect, ["red", "blue", "yellow"], rng);
     const inbound = createPlane(id, spec.color, spec.pos, spec.heading);
     inbound.inbound = true;
     planes.push(inbound);

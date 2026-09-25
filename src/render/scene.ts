@@ -10,7 +10,7 @@ import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent"; // side e
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
-import { defaultViewBounds } from "../core/layout";
+import { maxViewRadius } from "../core/layout";
 import type { WorldSize } from "../core/types";
 
 /**
@@ -95,12 +95,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
 export function fitShadowsToWorld(shadows: ShadowGenerator, world: WorldSize): void {
   const light = shadows.getLight() as DirectionalLight;
   // Planes fly anywhere in the default view (arrivals cross the gap between
-  // its edge and the airspace), which on tall screens reaches well past the
-  // field's diagonal: stretch to cover it so they keep a shadow.
-  const v = defaultViewBounds(world);
-  const viewDiagonal = Math.hypot(v.maxX - v.minX, v.maxY - v.minY);
+  // its edge and the airspace), which in tall or wide windows reaches well
+  // past the field's diagonal: stretch to cover the biggest one so they keep
+  // a shadow. Window-independent, so a resize never changes it.
   light.shadowFrustumSize = Math.max(
     Math.hypot(world.width, world.height) * SHADOW_COVERAGE,
-    viewDiagonal,
+    2 * maxViewRadius(world),
   );
 }

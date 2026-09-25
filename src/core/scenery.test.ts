@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STREAM_WIDTH, TREE_RUNWAY_CLEARANCE, TREE_STREAM_CLEARANCE } from "../config";
-import { computeWorldSize, layoutRunways } from "./layout";
+import { layoutRunways } from "./layout";
 import { mulberry32 } from "./math";
 import {
   buildScenery,
@@ -68,14 +68,14 @@ describe("distanceToPolyline", () => {
 
 describe("buildScenery", () => {
   it("is the same on every call", () => {
-    const world = computeWorldSize(1.78);
+    const world = { width: 178, height: 100 };
     const runways = layoutRunways(world);
     expect(buildScenery(world, runways)).toEqual(buildScenery(world, runways));
   });
 
   for (const aspect of ASPECTS) {
     describe(`at aspect ${aspect}`, () => {
-      const world = computeWorldSize(aspect);
+      const world = { width: 100 * aspect, height: 100 };
       const runways = layoutRunways(world);
       const scenery = buildScenery(world, runways);
 

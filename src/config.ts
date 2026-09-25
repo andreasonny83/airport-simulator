@@ -12,8 +12,25 @@ import type { RunwayColor } from "./core/types";
 // World
 // ---------------------------------------------------------------------------
 
-/** Fixed playfield height; width is `WORLD_HEIGHT * aspectRatio`. */
+/** Fixed playfield height (world units). */
 export const WORLD_HEIGHT = 100;
+
+/**
+ * Fixed playfield width / height. The world (runways, scenery, airspace) is
+ * the same size and shape on every screen and never changes on a window
+ * resize: the camera fits it to the window instead (see render/camera.ts),
+ * showing extra countryside on whichever axis the window has room to spare.
+ */
+export const WORLD_ASPECT = 16 / 9;
+
+/**
+ * Window shapes (width / height) the scenery map is sized to fill at any
+ * zoom, pan or heading (see core/scenery.ts `mapBounds`). Outside this range
+ * the zoomed-out view can reach past the landscape, where the clear colour
+ * (dark grass) takes over. Wider range = bigger map = slower landscape build.
+ */
+export const VIEW_ASPECT_MIN = 4 / 3;
+export const VIEW_ASPECT_MAX = 21 / 9;
 
 /**
  * Tilt of the camera from straight down (radians). 0 = top-down radar view;
@@ -42,8 +59,8 @@ export const ZOOM_MAX = 5;
 
 /**
  * Minimum world width required before the third (yellow) runway is added.
- * Yellow crosses blue, and the X plus red need about 4:3 of room, so
- * square and portrait screens stay with two runways.
+ * Yellow crosses blue, and the X plus red need about 4:3 of room, so a
+ * square or portrait `WORLD_ASPECT` would only get two runways.
  */
 export const YELLOW_RUNWAY_MIN_WIDTH = 125;
 

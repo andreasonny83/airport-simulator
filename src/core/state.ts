@@ -2,13 +2,16 @@
  * Game state construction. The state object is plain data: the simulation
  * mutates it, the renderer and UI only read it.
  */
-import { SPAWN_INTERVAL_START } from "../config";
-import { computeWorldSize, layoutRunways } from "./layout";
+import { SPAWN_INTERVAL_START, WORLD_ASPECT } from "../config";
+import { computeWorldSize, layoutRunways, safeViewAspect } from "./layout";
 import type { GameState } from "./types";
 
-/** Fresh state for a viewport of the given aspect ratio, waiting on the start screen. */
-export function createGameState(aspect: number): GameState {
-  const world = computeWorldSize(aspect);
+/**
+ * Fresh state waiting on the start screen. The world is fixed; `viewAspect`
+ * (window width / height) only affects where arrivals start.
+ */
+export function createGameState(viewAspect = WORLD_ASPECT): GameState {
+  const world = computeWorldSize();
   return {
     phase: "start",
     score: 0,
@@ -18,6 +21,7 @@ export function createGameState(aspect: number): GameState {
     nextPlaneId: 1,
     nextGroundSeq: 0,
     world,
+    viewAspect: safeViewAspect(viewAspect),
     runways: layoutRunways(world),
     planes: [],
   };
@@ -35,14 +39,9 @@ export function resetGameState(state: GameState): void {
 }
 
 /**
- * Recompute world size and runway layout after a viewport resize.
- *
- * Planes on the ground are removed: their routes, stands and hangars were
- * laid out for the old runway positions, and they've already scored. Planes
- * in the air keep flying (their paths are in world units and still valid).
+ * Record the window's new shape after a resize. The world, runways and
+ * planes are untouched: only where future arrivals start changes.
  */
-export function resizeWorld(state: GameState, aspect: number): void {
-  state.world = computeWorldSize(aspect);
-  state.runways = layoutRunways(state.world);
-  state.planes = state.planes.filter((p) => p.ground === null);
+export function setViewAspect(state: GameState, aspect: number): void {
+  state.viewAspect = safeViewAspect(aspect);
 }

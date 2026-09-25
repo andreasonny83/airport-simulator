@@ -7,7 +7,7 @@
 import "./style.css";
 import { COLOR_HEX, MAX_DT, ROTATE_STEP, ZOOM_STEP } from "./config";
 import { startGame, step, togglePause } from "./core/simulation";
-import { createGameState, resizeWorld } from "./core/state";
+import { createGameState, setViewAspect } from "./core/state";
 import type { SimEvent } from "./core/types";
 import { attachPanKeys } from "./input/keyboard";
 import { attachPointerInput } from "./input/pointer";
@@ -29,12 +29,10 @@ const state = createGameState(aspect());
 const cameraController = new CameraController(scene, canvas);
 const sceneSync = new SceneSync(scene, new MeshFactory(scene), shadows);
 
-function applyWorldSize(): void {
-  resizeWorld(state, aspect());
-  cameraController.setWorld(state.world);
-  sceneSync.rebuildWorld(state);
-}
-applyWorldSize();
+// The world is fixed-size, so the static scene is built once. Resizing the
+// window only refits the camera (every frame, from `aspect()`).
+cameraController.setWorld(state.world);
+sceneSync.rebuildWorld(state);
 
 // --- UI + input ----------------------------------------------------------------
 function setPaused(paused: boolean): void {
@@ -81,9 +79,10 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) setPaused(true);
 });
 
+// Resize: new canvas size and camera frustum only. The map stays put.
 window.addEventListener("resize", () => {
   engine.resize();
-  applyWorldSize();
+  setViewAspect(state, aspect());
 });
 
 function handleEvent(event: SimEvent): void {

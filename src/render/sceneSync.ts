@@ -111,7 +111,7 @@ export class SceneSync {
     this.boundary.setActive(active);
   }
 
-  /** Rebuild static geometry (landscape, runways, taxiways, hangars) after a resize. */
+  /** Build static geometry (landscape, runways, taxiways, hangars) for the world. */
   rebuildWorld(state: GameState): void {
     fitShadowsToWorld(this.shadows, state.world);
     this.landscape.setWorld(state.world, state.runways);

@@ -31,7 +31,7 @@ import {
 import { layoutAirports, type Airport } from "./airports";
 import { buildCountryside, countrysideClear, type Countryside } from "./countryside";
 import { distanceToPolygon, rectCorners } from "./geometry";
-import { defaultViewBounds } from "./layout";
+import { maxViewRadius } from "./layout";
 import { headingVector, lerp, mulberry32 } from "./math";
 import type { OrientedRect, Rng, Runway, Vec2, WorldSize } from "./types";
 
@@ -100,7 +100,9 @@ const STREAM_MAX_SHIFT = 150;
  * the camera can never see past.
  *
  * At zoom `z` the view shows the ground within `R / z` of its centre at any
- * heading, where `R` is the default view's half-diagonal on the ground.
+ * heading, where `R` is the default view's half-diagonal on the ground in
+ * the widest or tallest supported window (see `maxViewRadius`). It depends
+ * on the fixed world only, so the map never changes on a resize.
  * That centre can be panned up to `panFraction(z)` of the field's
  * half-diagonal `D` off the middle (see render/camera.ts). The sum is
  * largest at one of the two ends of the range where panning scales:
@@ -110,8 +112,7 @@ const STREAM_MAX_SHIFT = 150;
  * smaller than at one of the ends. `MAP_MARGIN` is added on top.
  */
 export function mapBounds(world: WorldSize): Bounds {
-  const v = defaultViewBounds(world);
-  const r = Math.hypot(v.maxX - v.minX, v.maxY - v.minY) / 2;
+  const r = maxViewRadius(world);
   const d = Math.hypot(world.width, world.height) / 2;
   const half = Math.max(d + r, r / ZOOM_MIN) + MAP_MARGIN;
   const cx = world.width / 2;

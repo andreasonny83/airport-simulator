@@ -37,7 +37,8 @@ const OFFSCREEN_MARGIN = PLANE_RADIUS * 2 + FLIGHT_ALTITUDE * Math.tan(CAMERA_TI
 
 /**
  * Pick a random colour, airspace edge (see `edgeWeights`) and inward track
- * for a new plane.
+ * for a new plane. `viewAspect` is the window's width / height: the world
+ * is fixed, but how much ground shows round it depends on the window.
  *
  * The track crosses the airspace edge at `entry`, somewhere along the
  * field's side, heading roughly inward. The plane starts back along that
@@ -46,9 +47,14 @@ const OFFSCREEN_MARGIN = PLANE_RADIUS * 2 + FLIGHT_ALTITUDE * Math.tan(CAMERA_TI
  * the screen edge rather than appearing out of nowhere, and its arrow
  * shows for the same time whichever side it comes from.
  */
-export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng: Rng): SpawnSpec {
+export function pickSpawn(
+  world: WorldSize,
+  viewAspect: number,
+  colors: readonly RunwayColor[],
+  rng: Rng,
+): SpawnSpec {
   const color = colors[Math.floor(rng() * colors.length)] ?? colors[0] ?? "red";
-  const edge = pickEdge(edgeWeights(world), rng()); // 0 top, 1 right, 2 bottom, 3 left
+  const edge = pickEdge(edgeWeights(world, viewAspect), rng()); // 0 top, 1 right, 2 bottom, 3 left
   const along = rng();
   const jitter = (rng() - 0.5) * 2 * SPAWN_HEADING_JITTER;
   // Cross the airspace edge, but aimed at the runway field: `along` spans
@@ -77,7 +83,7 @@ export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng:
 
   const dir = headingVector(heading);
   const back = { x: -dir.x, y: -dir.y };
-  const hidden = grow(defaultViewBounds(world), OFFSCREEN_MARGIN);
+  const hidden = grow(defaultViewBounds(world, viewAspect), OFFSCREEN_MARGIN);
   const runIn = exitDistance(entry, back, hidden) + ARRIVAL_WARNING * PLANE_SPEED;
   return {
     color,
@@ -94,17 +100,20 @@ export function pickSpawn(world: WorldSize, colors: readonly RunwayColor[], rng:
  *
  * - Length: arrivals spread evenly round the field, so long sides get more.
  * - Time: the default view shows more ground beyond some edges than others
- *   (the tilt squashes depth, so above and below, most on portrait screens).
+ *   (the tilt squashes depth, so above and below, most in tall windows).
  *   Planes from there spend longer flying in before the player can route
  *   them, so those edges get proportionally fewer.
  *
- * On 16:9 the two roughly cancel out (about even odds, as before). On
- * portrait, about 5 in 6 planes come from the sides; on ultrawide, the long
- * top and bottom get a few more.
+ * In a 16:9 window the two roughly cancel out (about even odds). Taller
+ * windows send more planes from the sides; ultrawide ones a few more from
+ * the long top and bottom.
  */
-export function edgeWeights(world: WorldSize): [number, number, number, number] {
+export function edgeWeights(
+  world: WorldSize,
+  viewAspect: number,
+): [number, number, number, number] {
   const b = airspaceBounds(world);
-  const v = defaultViewBounds(world);
+  const v = defaultViewBounds(world, viewAspect);
   // Straight-in time: the off-screen run-in, then across the visible gap
   // between the view edge and the airspace.
   const time = (gap: number) => (gap + OFFSCREEN_MARGIN) / PLANE_SPEED + ARRIVAL_WARNING;
@@ -160,9 +169,9 @@ export function spawnPlane(state: GameState, rng: Rng): Plane | null {
   const colors = unlockedColors(state.score, state.runways);
   if (colors.length === 0) return null;
 
-  let spec = pickSpawn(state.world, colors, rng);
+  let spec = pickSpawn(state.world, state.viewAspect, colors, rng);
   for (let i = 1; i < SPAWN_ATTEMPTS && isCrowded(spec, state.planes); i++) {
-    spec = pickSpawn(state.world, colors, rng);
+    spec = pickSpawn(state.world, state.viewAspect, colors, rng);
   }
 
   const plane = createPlane(state.nextPlaneId++, spec.color, spec.pos, spec.heading);

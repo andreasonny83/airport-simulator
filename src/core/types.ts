@@ -47,7 +47,7 @@ export type PlanePhase =
  */
 export type GamePhase = "start" | "playing" | "paused" | "gameover";
 
-/** Size of the playfield in world units (height is fixed, width follows aspect). */
+/** Size of the playfield in world units (fixed, see `WORLD_ASPECT`). */
 export interface WorldSize {
   width: number;
   height: number;
@@ -219,7 +219,13 @@ export interface GameState {
   nextPlaneId: number;
   /** Next touchdown sequence number (see `GroundState.seq`). */
   nextGroundSeq: number;
+  /** Fixed playfield size: never changes, whatever the window does. */
   world: WorldSize;
+  /**
+   * Window width / height. Doesn't touch the world; only decides how much
+   * ground the camera shows round it, so arrivals start out of sight.
+   */
+  viewAspect: number;
   runways: Runway[];
   planes: Plane[];
 }

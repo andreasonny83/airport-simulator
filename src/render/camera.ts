@@ -14,7 +14,7 @@ import { Camera } from "@babylonjs/core/Cameras/camera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { CAMERA_TILT, PAN_SPEED, ZOOM_MAX, ZOOM_MIN } from "../config";
-import { panFraction, viewHalfHeight } from "../core/layout";
+import { panFraction, safeViewAspect, viewHalfHeight } from "../core/layout";
 import type { Vec2, WorldSize } from "../core/types";
 
 /** Distance from target; with ortho it only needs to clear the scene. */
@@ -65,7 +65,7 @@ export class CameraController {
 
   setWorld(world: WorldSize): void {
     this.world = world;
-    // A resize can shrink the field under the current pan: pull it back in.
+    // A new world can be smaller than the current pan: pull it back in.
     clampToField(this.targetPan, this.world, this.zoom);
   }
 
@@ -162,10 +162,11 @@ export class CameraController {
    * airspace at the default heading. The scale depends on the world only,
    * never on alpha, so rotating never reads as a zoom. The sim sizes the
    * airspace independently of the view, so the dashed edge always sits
-   * inside it at zoom 1.
+   * inside it at zoom 1. The world never changes on a window resize: only
+   * the frustum's shape follows the window, showing more ground round it.
    */
   private fit(aspect: number): void {
-    const safeAspect = aspect > 0 ? aspect : 1;
+    const safeAspect = safeViewAspect(aspect);
     const halfH = viewHalfHeight(this.world, safeAspect) / this.zoom;
     const halfW = halfH * safeAspect;
     this.camera.orthoTop = halfH;

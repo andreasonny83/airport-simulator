@@ -1,9 +1,10 @@
 /**
  * World sizing and runway placement.
  *
- * The world is always `WORLD_HEIGHT` units tall; its width follows the
- * viewport aspect ratio so the playfield fills the screen. Runways are placed
- * at fractions of the world size, so they re-flow on every resize.
+ * The world is a fixed `WORLD_HEIGHT` × `WORLD_HEIGHT · WORLD_ASPECT`
+ * units whatever the window size, so the map never changes on a resize.
+ * The camera fits it to the window instead (see render/camera.ts). Runways
+ * are placed at fractions of the world size.
  */
 import {
   AIRSPACE_MARGIN,
@@ -15,6 +16,9 @@ import {
   RUNWAY_LENGTH,
   RUNWAY_THRESHOLD_INSET,
   RUNWAY_WIDTH,
+  VIEW_ASPECT_MAX,
+  VIEW_ASPECT_MIN,
+  WORLD_ASPECT,
   WORLD_HEIGHT,
   YELLOW_RUNWAY_MIN_WIDTH,
   ZOOM_MIN,
@@ -24,12 +28,17 @@ import { headingVector } from "./math";
 import type { Bounds } from "./scenery";
 import type { Runway, Vec2, WorldSize } from "./types";
 
-/** World dimensions for a viewport with the given width / height ratio. */
-export function computeWorldSize(aspect: number): WorldSize {
-  // Guard against a 0×0 canvas during startup (aspect would be NaN/Infinity).
-  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
-  // const safeAspect = 1.6;
-  return { width: WORLD_HEIGHT * safeAspect, height: WORLD_HEIGHT };
+/** World dimensions: fixed, independent of the window (see `WORLD_ASPECT`). */
+export function computeWorldSize(): WorldSize {
+  return { width: WORLD_HEIGHT * WORLD_ASPECT, height: WORLD_HEIGHT };
+}
+
+/**
+ * Guard against a 0×0 canvas during startup (aspect would be NaN/Infinity):
+ * fall back to the world's own shape.
+ */
+export function safeViewAspect(aspect: number): number {
+  return Number.isFinite(aspect) && aspect > 0 ? aspect : WORLD_ASPECT;
 }
 
 /**
@@ -67,27 +76,41 @@ export function viewHalfHeight(world: WorldSize, aspect: number): number {
   const maxX = (a.maxX - a.minX) / 2;
   const maxY =
     ((a.maxY - a.minY) / 2) * Math.cos(CAMERA_TILT) + FLIGHT_ALTITUDE * Math.sin(CAMERA_TILT);
-  const safeAspect = aspect > 0 ? aspect : 1;
-  return Math.max(maxY, maxX / safeAspect) * CAMERA_FIT_PADDING;
+  return Math.max(maxY, maxX / safeViewAspect(aspect)) * CAMERA_FIT_PADDING;
 }
 
 /**
  * The patch of ground the default view shows (zoom 1, not rotated or
- * panned), in sim coordinates. Wider than the airspace on one axis unless
- * the screen's aspect matches it exactly. Arriving planes start outside it,
- * so they fly into view instead of popping up.
- *
- * The world's aspect equals the viewport's (see `computeWorldSize`), so the
- * view can be worked out from `world` alone.
+ * panned) in a window of the given `aspect`, in sim coordinates. Wider than
+ * the airspace on one axis unless the window's shape matches it exactly.
+ * Arriving planes start outside it, so they fly into view instead of
+ * popping up.
  */
-export function defaultViewBounds(world: WorldSize): Bounds {
-  const aspect = world.width / world.height;
-  const halfH = viewHalfHeight(world, aspect);
-  const halfX = halfH * aspect;
+export function defaultViewBounds(world: WorldSize, aspect: number): Bounds {
+  const safeAspect = safeViewAspect(aspect);
+  const halfH = viewHalfHeight(world, safeAspect);
+  const halfX = halfH * safeAspect;
   const halfY = halfH / Math.cos(CAMERA_TILT);
   const cx = world.width / 2;
   const cy = world.height / 2;
   return { minX: cx - halfX, minY: cy - halfY, maxX: cx + halfX, maxY: cy + halfY };
+}
+
+/**
+ * Largest ground half-diagonal of the default view over every window shape
+ * in `VIEW_ASPECT_MIN`..`VIEW_ASPECT_MAX`: what the static scenery map and
+ * shadow frustum are sized for, so neither changes on a resize.
+ *
+ * The view contains the airspace, so as the window narrows its ground width
+ * stays put while its depth grows, and as it widens the reverse: the
+ * diagonal is largest at one end of the range, never in the middle.
+ */
+export function maxViewRadius(world: WorldSize): number {
+  const radius = (aspect: number) => {
+    const v = defaultViewBounds(world, aspect);
+    return Math.hypot(v.maxX - v.minX, v.maxY - v.minY) / 2;
+  };
+  return Math.max(radius(VIEW_ASPECT_MIN), radius(VIEW_ASPECT_MAX));
 }
 
 /**
@@ -116,8 +139,9 @@ export function isInAirspace(p: Vec2, world: WorldSize): boolean {
  */
 export function layoutRunways(world: WorldSize): Runway[] {
   let nextStandId = 0;
-  // Narrow (portrait) screens only get two runways, like the prototype, and
-  // may move them (`narrow`) to use the extra height.
+  // Narrow (portrait) worlds only get two runways, like the prototype, and
+  // may move them (`narrow`) to use the extra height. The world is fixed at
+  // `WORLD_ASPECT` now, so this only kicks in if that is set below ~4:3.
   const narrow = world.width < YELLOW_RUNWAY_MIN_WIDTH;
   const specs = RUNWAY_LAYOUT.filter((spec) => !narrow || spec.color !== "yellow").map((spec) =>
     narrow && spec.narrow ? { ...spec, ...spec.narrow } : spec,

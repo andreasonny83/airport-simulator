@@ -117,8 +117,8 @@ export function mountStage(build: (stage: Stage) => FrameFn | void, timeScale = 
 // ---------------------------------------------------------------------------
 
 /**
- * The game's own camera (fixed tilt, orthographic) framing a world sized to
- * the canvas, exactly like main.ts. Use it to judge how an element reads at
+ * The game's own camera (fixed tilt, orthographic) framing the fixed-size
+ * world in the canvas, exactly like main.ts. Use it to judge how an element reads at
  * real game scale.
  *
  * @param rotation  extra heading (radians) on top of the default view
@@ -130,7 +130,7 @@ export function gameCamera(
   zoom = 1,
 ): { controller: CameraController; world: WorldSize; frame: FrameFn } {
   const controller = new CameraController(stage.scene, stage.canvas);
-  const world = computeWorldSize(stage.aspect());
+  const world = computeWorldSize();
   controller.setWorld(world);
   controller.rotateBy(rotation);
   controller.zoomBy(zoom);
