@@ -13,6 +13,11 @@
  *
  * Static white markings are merged into a single mesh per runway, and so are
  * the edge lights, so each runway costs a handful of draw calls.
+ *
+ * Crossing runways (blue and yellow's X) share their pavement where they
+ * meet. As on a real airfield, the intersection keeps only the primary
+ * runway's centreline (the one listed first): edge lines and edge lights
+ * of both stop at the other strip, and the secondary's paint does too.
  */
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
@@ -24,7 +29,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import { COLOR_HEX, RUNWAY_THRESHOLD_INSET } from "../config";
 import { runwayDesignator } from "../core/layout";
-import type { Runway, RunwayColor, WorldSize } from "../core/types";
+import type { Runway, RunwayColor, Vec2, WorldSize } from "../core/types";
 import { headingToRotationY, toScene } from "./coords";
 
 // Layer heights (scene y). Everything sits above the grass (0) and stream
@@ -45,6 +50,85 @@ const APPROACH_LIGHT_COUNT = 5;
 const APPROACH_LIGHT_SPACING = 1.2;
 /** Seconds for one rabbit sweep from the farthest light to the threshold. */
 const RABBIT_PERIOD = 1.1;
+
+/** Sampling step (world units) when splitting edge lines round an intersection. */
+const CUT_STEP = 0.05;
+
+/**
+ * Where a runway's own markings may go, given the runways crossing it.
+ * Works in the runway's local frame: x along the landing direction, z
+ * across (to the left of the landing direction, as the root node's +z).
+ */
+class Clearance {
+  private readonly dir: Vec2;
+  private readonly left: Vec2;
+
+  constructor(
+    private readonly runway: Runway,
+    /** Other runways whose pavement overlaps this one. */
+    private readonly crossing: readonly Runway[],
+  ) {
+    const c = Math.cos(runway.heading);
+    const s = Math.sin(runway.heading);
+    this.dir = { x: c, y: s };
+    // Babylon's rotation about y turns local +z into sim (sin h, -cos h).
+    this.left = { x: s, y: -c };
+  }
+
+  /** True if local (x, z) is clear of every crossing runway's pavement. */
+  clear(x: number, z: number, margin = 0): boolean {
+    const { center } = this.runway;
+    const p = {
+      x: center.x + this.dir.x * x + this.left.x * z,
+      y: center.y + this.dir.y * x + this.left.y * z,
+    };
+    return this.crossing.every((o) => !onPavement(p, o, margin));
+  }
+
+  /** True if a local rectangle (centre x, z; size length × width) is clear. */
+  clearRect(x: number, z: number, length: number, width: number): boolean {
+    const hl = length / 2;
+    const hw = width / 2;
+    return [
+      [0, 0],
+      [-hl, -hw],
+      [-hl, hw],
+      [hl, -hw],
+      [hl, hw],
+    ].every(([dx, dz]) => this.clear(x + dx!, z + dz!));
+  }
+
+  /** Sub-ranges of [from, to] along local x, at lateral z, clear of crossings. */
+  spans(z: number, from: number, to: number): Array<[number, number]> {
+    if (this.crossing.length === 0) return [[from, to]];
+    const out: Array<[number, number]> = [];
+    let start: number | null = null;
+    for (let x = from; x <= to + 1e-9; x += CUT_STEP) {
+      const ok = this.clear(x, z, 0.15);
+      if (ok && start === null) start = x;
+      if (!ok && start !== null) {
+        out.push([start, x - CUT_STEP]);
+        start = null;
+      }
+    }
+    if (start !== null) out.push([start, to]);
+    return out.filter(([a, b]) => b - a > 0.2);
+  }
+}
+
+/** True if sim point `p` is on `runway`'s pavement (shoulder included). */
+function onPavement(p: Vec2, runway: Runway, margin: number): boolean {
+  const c = Math.cos(runway.heading);
+  const s = Math.sin(runway.heading);
+  const dx = p.x - runway.center.x;
+  const dy = p.y - runway.center.y;
+  const along = dx * c + dy * s;
+  const across = -dx * s + dy * c;
+  return (
+    Math.abs(along) <= runway.length / 2 + SHOULDER_MARGIN + margin &&
+    Math.abs(across) <= runway.width / 2 + SHOULDER_MARGIN + margin
+  );
+}
 
 /** A built runway: its root node plus the lights `update` animates. */
 export class RunwayView {
@@ -93,7 +177,18 @@ export class RunwayFactory {
     this.edgeLight = unlit("rwyEdgeLight", Color3.FromHexString("#fff3d0"), scene);
   }
 
-  create(runway: Runway, world: WorldSize): RunwayView {
+  /**
+   * @param all  every runway on the field (this one included), so markings
+   *   can make way at intersections. Order decides which crossing runway
+   *   is primary: the earlier one keeps its centreline through the X.
+   */
+  create(runway: Runway, world: WorldSize, all: readonly Runway[] = []): RunwayView {
+    const crossing = all.filter((o) => o !== runway && pavementsCross(runway, o));
+    // Secondary runway: its paint also stops at the primary's pavement.
+    const cutPaint = crossing.some((o) => all.indexOf(o) < all.indexOf(runway));
+    const clearance = new Clearance(runway, crossing);
+    const paintClearance = cutPaint ? clearance : new Clearance(runway, []);
+
     const root = new TransformNode(`runway-${runway.color}`, this.scene);
     root.position = toScene(runway.center, world);
     root.rotation.y = headingToRotationY(runway.heading);
@@ -118,9 +213,9 @@ export class RunwayFactory {
     const bar = this.mark(0.9, W - 0.3, thresholdX, 0, 0.012);
     bar.material = this.colorMaterial(runway.color);
 
-    const paint = this.buildPaint(L, W, thresholdX);
+    const paint = this.buildPaint(L, W, thresholdX, clearance, paintClearance);
     const number = this.buildNumber(runwayDesignator(runway.heading), thresholdX + 4.5);
-    const edgeLights = this.buildEdgeLights(L, W);
+    const edgeLights = this.buildEdgeLights(L, W, clearance);
     const approach = this.buildApproachLights(runway.color, L, W);
 
     const parts = [shoulder, asphalt, bar, paint, number, edgeLights, ...approach];
@@ -141,13 +236,25 @@ export class RunwayFactory {
   /**
    * All static white paint, merged into one mesh: piano keys, touchdown
    * zone bars, aiming points, centreline dashes, edge lines and end bar.
+   *
+   * @param edges  where edge lines may run (they always stop at crossings)
+   * @param marks  where every other mark may go (stops at crossings only
+   *   on a secondary runway)
    */
-  private buildPaint(L: number, W: number, thresholdX: number): Mesh {
+  private buildPaint(
+    L: number,
+    W: number,
+    thresholdX: number,
+    edges: Clearance,
+    clear: Clearance,
+  ): Mesh {
     const marks: Mesh[] = [];
     const end = L / 2;
-    /** Add a mark if it fits before the far end of the runway. */
+    /** Add a mark if it fits before the far end of the runway, clear of crossings. */
     const add = (length: number, width: number, x: number, z: number) => {
-      if (x + length / 2 < end - 0.3) marks.push(this.mark(length, width, x, z));
+      if (x + length / 2 < end - 0.3 && clear.clearRect(x, z, length, width)) {
+        marks.push(this.mark(length, width, x, z));
+      }
     };
     /** Same mark on both sides of the centreline. */
     const pair = (length: number, width: number, x: number, z: number) => {
@@ -169,11 +276,15 @@ export class RunwayFactory {
     // Centreline dashes, starting after the runway number.
     for (let x = thresholdX + 6.6; x < end - 1; x += 2.1) add(1.2, 0.14, x, 0);
 
-    // Edge lines along the full paved length, plus an end bar.
-    const edgeLen = end - (thresholdX - 0.45) - 0.2;
-    const edgeX = thresholdX - 0.45 + edgeLen / 2;
+    // Edge lines along the full paved length (broken where another runway
+    // crosses), plus an end bar.
     // (Pushed directly: they run right to the end, past `add`'s cutoff.)
-    for (const side of [1, -1]) marks.push(this.mark(edgeLen, 0.1, edgeX, side * (W / 2 - 0.25)));
+    for (const side of [1, -1]) {
+      const z = side * (W / 2 - 0.25);
+      for (const [a, b] of edges.spans(z, thresholdX - 0.45, end - 0.2)) {
+        marks.push(this.mark(b - a, 0.1, (a + b) / 2, z));
+      }
+    }
     marks.push(this.mark(0.25, W - 0.4, end - 0.35, 0));
 
     const merged = Mesh.MergeMeshes(marks, true);
@@ -225,15 +336,21 @@ export class RunwayFactory {
   // Lights
   // -------------------------------------------------------------------------
 
-  /** Small warm-white lights just outside both edges, merged into one mesh. */
-  private buildEdgeLights(L: number, W: number): Mesh {
+  /**
+   * Small warm-white lights just outside both edges, merged into one mesh.
+   * None on a crossing runway's pavement.
+   */
+  private buildEdgeLights(L: number, W: number, clear: Clearance): Mesh {
     const lights: Mesh[] = [];
     const count = Math.floor(L / EDGE_LIGHT_SPACING);
     const start = -((count * EDGE_LIGHT_SPACING) / 2);
     for (let i = 0; i <= count; i++) {
       for (const side of [1, -1]) {
+        const x = start + i * EDGE_LIGHT_SPACING;
+        const z = side * (W / 2 + 0.3);
+        if (!clear.clear(x, z, 0.3)) continue;
         const light = CreateBox("edgeLight", { size: 0.16 }, this.scene);
-        light.position.set(start + i * EDGE_LIGHT_SPACING, LIGHT_Y, side * (W / 2 + 0.3));
+        light.position.set(x, LIGHT_Y, z);
         lights.push(light);
       }
     }
@@ -292,6 +409,21 @@ export class RunwayFactory {
     box.position.set(x, PAINT_Y + lift, z);
     return box;
   }
+}
+
+/** True if the paved strips of `a` and `b` overlap (sampled along `a`). */
+function pavementsCross(a: Runway, b: Runway): boolean {
+  const c = Math.cos(a.heading);
+  const s = Math.sin(a.heading);
+  const half = a.length / 2 + SHOULDER_MARGIN;
+  const side = a.width / 2 + SHOULDER_MARGIN;
+  for (let x = -half; x <= half; x += 0.5) {
+    for (const z of [-side, 0, side]) {
+      const p = { x: a.center.x + c * x + s * z, y: a.center.y + s * x - c * z };
+      if (onPavement(p, b, 0)) return true;
+    }
+  }
+  return false;
 }
 
 /** Lit material with no specular highlight. */

@@ -30,7 +30,6 @@ import {
   MAX_GROUND_BRAKE,
   PLANE_SPEED,
   ROLLOUT_BRAKE,
-  RUNWAY_EXIT_U,
   STAND_TURN_RADIUS,
   STOW_SPEED,
   TAXI_BRAKE,
@@ -81,16 +80,13 @@ export function isOnGround(plane: Plane): plane is Plane & { ground: GroundState
  */
 export function touchDown(plane: Plane, runway: Runway, seq: number): void {
   const dir = headingVector(runway.heading);
-  const { exit, turnoff, hold } = runway.airfield;
+  const { exit, exitU, turnoff, hold } = runway.airfield;
 
   // How far along the runway (from its centre) the plane touched down.
   const along = (plane.pos.x - runway.center.x) * dir.x + (plane.pos.y - runway.center.y) * dir.y;
   // Meet the centreline a merge distance ahead, but always leave a straight
   // stretch before the turnoff so the two curves don't run into each other.
-  const mergeAt = Math.min(
-    along + CENTERLINE_MERGE_DISTANCE,
-    RUNWAY_EXIT_U - MIN_STRAIGHT_BEFORE_EXIT,
-  );
+  const mergeAt = Math.min(along + CENTERLINE_MERGE_DISTANCE, exitU - MIN_STRAIGHT_BEFORE_EXIT);
   const merge = {
     x: runway.center.x + dir.x * mergeAt,
     y: runway.center.y + dir.y * mergeAt,
@@ -213,18 +209,33 @@ function assignStands(state: GameState): void {
  * Route distance (from the start of `plane`'s route) of the first point in
  * the next `GROUND_LOOKAHEAD` units that comes within `GROUND_SEPARATION`
  * of `other`, or null if the way is clear.
+ *
+ * Each point is checked against where `other` is now and against where it
+ * will be by the time `plane` gets there (at their current speeds). The
+ * second check catches crossing traffic, e.g. two rollouts converging on the
+ * blue/yellow intersection: the other plane isn't on our route yet, but it
+ * will be, and a rollout needs a long way to stop.
  */
 function conflictAhead(plane: Plane & { ground: GroundState }, other: Plane): number | null {
-  const { route, s } = plane.ground;
+  const { route, s, speed } = plane.ground;
   // Only traffic in front matters; whoever is behind waits for us.
   const fwd = headingVector(plane.heading);
   if ((other.pos.x - plane.pos.x) * fwd.x + (other.pos.y - plane.pos.y) * fwd.y <= 0) return null;
 
   const end = Math.min(routeLength(route), s + GROUND_LOOKAHEAD);
   const p: Vec2 = { x: 0, y: 0 };
+  const later: Vec2 = { x: 0, y: 0 };
+  const og = other.ground;
   for (let d = s; d <= end; d += SCAN_STEP) {
     sampleRoute(route, d, p);
     if (distance(p, other.pos) < GROUND_SEPARATION) return d;
+    if (og && og.speed > 0) {
+      // Seconds until we reach `p` (a crawl counts as walking pace, so a
+      // stopped plane doesn't see the whole future at once).
+      const eta = (d - s) / Math.max(speed, 1);
+      sampleRoute(og.route, Math.min(routeLength(og.route), og.s + og.speed * eta), later);
+      if (distance(p, later) < GROUND_SEPARATION) return d;
+    }
   }
   return null;
 }

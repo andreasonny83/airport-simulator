@@ -1,9 +1,19 @@
 /**
  * Player-drawn flight paths.
  */
-import { ANCHOR_RADIUS, LANDING_ANGLE_TOLERANCE, PATH_MIN_SPACING } from "../config";
+import {
+  ANCHOR_HEADING_MARGIN,
+  ANCHOR_LANDING_MARGIN,
+  ANCHOR_RADIUS,
+  FLIGHT_SUBSTEP,
+  LANDING_ANGLE_TOLERANCE,
+  LANDING_RADIUS,
+  PATH_MIN_SPACING,
+  PLANE_SPEED,
+} from "../config";
 import { airspaceBounds, isInAirspace } from "./layout";
 import { angleDelta, distance } from "./math";
+import { updatePlane } from "./plane";
 import type { Plane, Runway, Vec2, WorldSize } from "./types";
 
 /** Begin drawing a new path for `plane`, discarding the old one. */
@@ -78,14 +88,20 @@ export function clampPathPoint(plane: Plane, point: Vec2, world: WorldSize): Vec
  * plane flies a straight final approach and `checkLanding` is guaranteed to
  * fire as it arrives. `plane.pathAnchored` is set, which locks the path.
  *
- * The approach is judged on the final leg (last point outside the area →
- * threshold), the same heading the plane will have when it gets there. A
- * path reaching the threshold from the wrong end or side-on doesn't anchor;
- * the player can keep dragging and come round again.
+ * The approach is judged twice: first on the final leg (last point outside
+ * the area → threshold), a cheap check that rejects paths reaching the
+ * threshold from the wrong end or side-on; then by a dry-run flight (see
+ * `landsOnSnappedPath`), since the plane's limited turn rate can make it
+ * miss a leg that looks fine on paper. Either way a rejected path simply
+ * doesn't anchor: the player can keep dragging and come round again.
  *
  * @returns the runway anchored to, or null.
  */
-export function anchorPath(plane: Plane, runways: readonly Runway[]): Runway | null {
+export function anchorPath(
+  plane: Plane,
+  runways: readonly Runway[],
+  world: WorldSize,
+): Runway | null {
   if (plane.pathAnchored || plane.path.length === 0) return null;
   const runway = runways.find((r) => r.color === plane.color);
   if (!runway) return null;
@@ -102,9 +118,67 @@ export function anchorPath(plane: Plane, runways: readonly Runway[]): Runway | n
   const approach = Math.atan2(runway.threshold.y - from.y, runway.threshold.x - from.x);
   if (Math.abs(angleDelta(approach, runway.heading)) > LANDING_ANGLE_TOLERANCE) return null;
 
-  plane.path.length = keep;
-  plane.path.push({ ...runway.threshold });
+  const snapped = [...plane.path.slice(0, keep), { ...runway.threshold }];
+  // A good-looking final leg can still be unflyable, e.g. a sharp corner at
+  // the edge of the anchor area: the plane can't turn that tightly, cuts
+  // the corner and arrives off-heading or wide. Only anchor (and show the
+  // green ring) if the plane really lands.
+  if (!landsOnSnappedPath(plane, snapped, runway, world)) return null;
+
+  plane.path = snapped;
   plane.pathAnchored = true;
   plane.pathVersion++;
   return runway;
+}
+
+/**
+ * Dry run: fly a copy of `plane` along `path` and report whether it lands
+ * on `runway`.
+ *
+ * This is a faithful preview of the real flight: the sim is deterministic,
+ * flight is integrated in small sub-steps whatever the frame rate, and an
+ * anchored path is locked, so nothing else changes the plane's route on the
+ * way. (Traffic can still force a go-around or a crash; that isn't judged
+ * here.)
+ */
+function landsOnSnappedPath(
+  plane: Plane,
+  path: readonly Vec2[],
+  runway: Runway,
+  world: WorldSize,
+): boolean {
+  const ghost: Plane = {
+    ...plane,
+    pos: { ...plane.pos },
+    path: path.map((p) => ({ ...p })),
+    pathAnchored: true,
+    ground: null,
+  };
+
+  // Time budget: the whole path at cruise speed, doubled for turns.
+  let length = 0;
+  let prev = plane.pos;
+  for (const p of path) {
+    length += distance(prev, p);
+    prev = p;
+  }
+  const maxSteps = Math.ceil(((2 * length) / PLANE_SPEED + 1) / FLIGHT_SUBSTEP);
+
+  for (let i = 0; i < maxSteps; i++) {
+    updatePlane(ghost, FLIGHT_SUBSTEP, world);
+    // Same test as `checkLanding`, with a safety margin: the real flight can
+    // differ slightly (landing is checked once per frame, and sub-steps
+    // shrink on fast displays), so a borderline pass isn't a promise.
+    const over = distance(ghost.pos, runway.threshold) <= LANDING_RADIUS - ANCHOR_LANDING_MARGIN;
+    const aligned =
+      Math.abs(angleDelta(ghost.heading, runway.heading)) <=
+      LANDING_ANGLE_TOLERANCE - ANCHOR_HEADING_MARGIN;
+    if (over && aligned) return true;
+    // Threshold dropped (reached off-heading, or skipped as unreachable) and
+    // the plane has flown clear of it: it would not land.
+    if (!ghost.pathAnchored && distance(ghost.pos, runway.threshold) > LANDING_RADIUS) {
+      return false;
+    }
+  }
+  return false;
 }

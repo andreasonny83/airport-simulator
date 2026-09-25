@@ -1,6 +1,13 @@
 /**
- * River boat traffic: small boats that now and then sail along the stretch
- * of river beside the playfield.
+ * River boat traffic: small boats sailing the whole river, from one edge of
+ * the map to the other.
+ *
+ * Nothing pops into view: boats set off from the river's ends, far out in
+ * the horizon haze (they fade with the grass, see `horizonFade`), and the
+ * river starts with a few already under way. Sailboats are too tall for the
+ * drawbridges when they're down, so each one asks for the bridge to open
+ * (`bridgeDemand`) and waits short of it until it's up; motorboats pass
+ * under.
  *
  * Purely decorative, like the rest of the scenery: the simulation never
  * reads it, so boats can't affect planes, paths or scoring. Kept pure (no
@@ -10,13 +17,12 @@
 import {
   BOAT_FADE_DISTANCE,
   BOAT_MAX,
-  BOAT_ROUTE_MARGIN,
   BOAT_SPAWN_MAX,
   BOAT_SPAWN_MIN,
   BOAT_TYPES,
 } from "../config";
 import { lerp, mulberry32 } from "./math";
-import type { StreamPoint } from "./scenery";
+import { horizonFade, mapBounds, type Bounds, type StreamPoint } from "./scenery";
 import type { Rng, Vec2, WorldSize } from "./types";
 
 export type BoatKind = keyof typeof BOAT_TYPES;
@@ -28,21 +34,27 @@ export interface Boat {
   s: number;
   /** +1 sails downstream (increasing `s`), -1 upstream. */
   dir: 1 | -1;
+  /** Current speed: cruising, or stopped for a bridge or the boat ahead. */
+  speed: number;
 }
 
-/** The stretch of river boats use, with arc lengths for sampling. */
+/** The river boats use, with arc lengths for sampling. */
 export interface BoatRoute {
   line: readonly StreamPoint[];
   /** Cumulative distance along `line` at each point. */
   along: number[];
-  /** Boats appear and disappear at these distances (just off the field). */
+  /** Boats appear and disappear at these distances (the map's edges). */
   start: number;
   end: number;
+  /** The scenery map, for fading boats into the horizon. */
+  bounds: Bounds;
 }
 
 export interface BoatTraffic {
   route: BoatRoute;
   boats: Boat[];
+  /** Distance along the river of each bridge (drawbridge) crossing it. */
+  gates: number[];
   /** Seconds until the next boat tries to set off. */
   nextSpawnIn: number;
   nextId: number;
@@ -53,18 +65,25 @@ export interface BoatTraffic {
 export interface BoatPose {
   pos: Vec2;
   heading: number;
-  /** 0..1: fades in/out near the route's ends so boats never pop. */
+  /** 0..1: fades with the horizon haze and at the river's very ends. */
   opacity: number;
 }
 
 /** Seed for boat traffic, so every game shows the same rhythm of boats. */
 const TRAFFIC_SEED = 0xb0a7;
-
+/** Boats already under way when the world is built. */
+const START_BOATS = 4;
 /**
- * Route over the part of the river within `BOAT_ROUTE_MARGIN` of the
- * playfield (the river itself runs right across the much larger map, and
- * a boat crawling along all of it would spend minutes out of sight).
+ * A sailboat asks for a bridge to open from this far away (along the
+ * river): enough for the leaves' lift, not so much that cars wait long…
  */
+const GATE_CALL = 16;
+/** …and waits this far short of it until the leaves are up. */
+const GATE_WAIT = 7;
+/** Boats keep at least this far behind the boat ahead in their lane. */
+const BOAT_GAP = 6;
+
+/** The whole river within the scenery map, edge to edge. */
 export function boatRoute(line: readonly StreamPoint[], world: WorldSize): BoatRoute {
   const along: number[] = [0];
   for (let i = 1; i < line.length; i++) {
@@ -72,43 +91,78 @@ export function boatRoute(line: readonly StreamPoint[], world: WorldSize): BoatR
       along[i - 1]! + Math.hypot(line[i]!.x - line[i - 1]!.x, line[i]!.y - line[i - 1]!.y),
     );
   }
-  const margin = BOAT_ROUTE_MARGIN * world.height;
-  const first = line.findIndex((p) => p.x >= -margin);
+  const bounds = mapBounds(world);
+  const inside = (p: StreamPoint) => p.x >= bounds.minX && p.x <= bounds.maxX;
+  const first = Math.max(0, line.findIndex(inside));
   let last = line.length - 1;
-  while (last > 0 && line[last]!.x > world.width + margin) last--;
-  return {
-    line,
-    along,
-    start: along[Math.max(0, first)]!,
-    end: along[Math.max(0, last)]!,
-  };
+  while (last > 0 && !inside(line[last]!)) last--;
+  return { line, along, start: along[first]!, end: along[last]!, bounds };
 }
 
 /**
- * Fresh traffic for a river. One sailboat is already under way beside the
- * field, so the river looks alive from the first frame; the rest launch
- * from the route's ends on the spawn timer.
+ * Fresh traffic for a river: a few boats already spread along it, the rest
+ * setting off from its ends on the spawn timer.
+ *
+ * @param gates  where bridges cross the river (any point on each bridge)
  */
-export function createBoatTraffic(line: readonly StreamPoint[], world: WorldSize): BoatTraffic {
+export function createBoatTraffic(
+  line: readonly StreamPoint[],
+  world: WorldSize,
+  gates: readonly Vec2[] = [],
+): BoatTraffic {
   const rng = mulberry32(TRAFFIC_SEED);
   const route = boatRoute(line, world);
-  return {
+  const traffic: BoatTraffic = {
     route,
-    boats: [{ id: 1, kind: "sailboat", s: lerp(route.start, route.end, 0.35), dir: 1 }],
+    boats: [],
+    gates: gates.map((g) => nearestAlong(route, g)),
     nextSpawnIn: lerp(BOAT_SPAWN_MIN, BOAT_SPAWN_MAX, rng()) / 2,
-    nextId: 2,
+    nextId: 1,
     rng,
   };
+  for (let i = 0; i < START_BOATS; i++) {
+    const kind: BoatKind = i % 2 === 0 ? "sailboat" : "motorboat";
+    const dir: 1 | -1 = rng() < 0.5 ? 1 : -1;
+    // Spread out along the river, and clear of the bridges.
+    let s = lerp(route.start, route.end, (i + 0.25 + rng() * 0.5) / START_BOATS);
+    if (traffic.gates.some((g) => Math.abs(g - s) < GATE_CALL)) s += GATE_CALL * 2 * dir;
+    s = Math.max(route.start, Math.min(route.end, s));
+    traffic.boats.push({ id: traffic.nextId++, kind, s, dir, speed: BOAT_TYPES[kind].speed });
+  }
+  return traffic;
 }
 
 /**
  * Advance every boat by `dt` seconds, retire the ones that reached the far
- * end of the route, and launch a new one when the spawn timer runs out.
+ * end of the river, and launch a new one when the spawn timer runs out.
+ *
+ * @param gatesOpen  per bridge (see `createBoatTraffic`): leaves fully up
  */
-export function stepBoats(traffic: BoatTraffic, dt: number): void {
+export function stepBoats(
+  traffic: BoatTraffic,
+  dt: number,
+  gatesOpen: readonly boolean[] = [],
+): void {
   const { route } = traffic;
   for (const boat of traffic.boats) {
-    boat.s += boat.dir * BOAT_TYPES[boat.kind].speed * dt;
+    const cruise = BOAT_TYPES[boat.kind].speed;
+    let target: number = cruise;
+    // Sailboats wait short of a bridge that isn't open yet.
+    if (boat.kind === "sailboat") {
+      traffic.gates.forEach((g, i) => {
+        const ahead = (g - boat.s) * boat.dir;
+        if (!gatesOpen[i] && ahead > GATE_WAIT - 1 && ahead < GATE_WAIT + 3) target = 0;
+      });
+    }
+    // Don't sail into the boat ahead in the same lane.
+    for (const other of traffic.boats) {
+      if (other === boat || other.kind !== boat.kind || other.dir !== boat.dir) continue;
+      const gap = (other.s - boat.s) * boat.dir;
+      if (gap > 0 && gap < BOAT_GAP) target = Math.min(target, other.speed);
+    }
+    // Ease speed (boats take a moment to stop and to get going).
+    boat.speed += (target - boat.speed) * Math.min(1, dt * 1.5);
+    boat.s += boat.dir * boat.speed * dt;
   }
   traffic.boats = traffic.boats.filter((b) => b.s >= route.start && b.s <= route.end);
 
@@ -120,14 +174,39 @@ export function stepBoats(traffic: BoatTraffic, dt: number): void {
   const kind: BoatKind = traffic.rng() < 0.5 ? "sailboat" : "motorboat";
   const dir: 1 | -1 = traffic.rng() < 0.5 ? 1 : -1;
   const s = dir === 1 ? route.start : route.end;
-  // Same kind + same direction = same speed and lane, so a boat can only
-  // collide with one that launched from the same end moments ago. Skip the
-  // launch if that one hasn't got clear yet; the next timer will retry.
+  // Skip the launch if the last boat from this end hasn't got clear yet;
+  // the next timer will retry.
   const blocked = traffic.boats.some(
-    (b) => b.kind === kind && b.dir === dir && Math.abs(b.s - s) < BOAT_FADE_DISTANCE * 1.5,
+    (b) => b.kind === kind && b.dir === dir && Math.abs(b.s - s) < BOAT_GAP * 2,
   );
   if (blocked) return;
-  traffic.boats.push({ id: traffic.nextId++, kind, s, dir });
+  traffic.boats.push({ id: traffic.nextId++, kind, s, dir, speed: BOAT_TYPES[kind].speed });
+}
+
+/** Per bridge: a sailboat is on its way through (within `GATE_CALL`, or under it). */
+export function bridgeDemand(traffic: BoatTraffic): boolean[] {
+  return traffic.gates.map((g) =>
+    traffic.boats.some((b) => {
+      if (b.kind !== "sailboat") return false;
+      const ahead = (g - b.s) * b.dir;
+      // Still wanted until the mast is well past the far side.
+      return ahead < GATE_CALL && ahead > -6;
+    }),
+  );
+}
+
+/** Distance along the river of the point nearest `p`. */
+function nearestAlong(route: BoatRoute, p: Vec2): number {
+  let best = 0;
+  let bestD = Infinity;
+  route.line.forEach((q, i) => {
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < bestD) {
+      bestD = d;
+      best = route.along[i]!;
+    }
+  });
+  return best;
 }
 
 /** Index of the segment containing distance `s` (binary search). */
@@ -175,6 +254,9 @@ export function boatPose(route: BoatRoute, boat: Boat): BoatPose {
   const pos = { x: here.x - ty * offset, y: here.y + tx * offset };
 
   const fromEnds = Math.min(boat.s - route.start, route.end - boat.s);
-  const opacity = Math.max(0, Math.min(1, fromEnds / BOAT_FADE_DISTANCE));
+  const opacity = Math.max(
+    0,
+    Math.min(fromEnds / BOAT_FADE_DISTANCE, 1 - horizonFade(pos, route.bounds)),
+  );
   return { pos, heading: Math.atan2(ty, tx), opacity };
 }

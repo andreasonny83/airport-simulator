@@ -40,8 +40,12 @@ export const ZOOM_MIN = 0.6;
 /** Highest zoom (fully zoomed in). */
 export const ZOOM_MAX = 5;
 
-/** Minimum world width required before the third (yellow) runway is added. */
-export const YELLOW_RUNWAY_MIN_WIDTH = 75;
+/**
+ * Minimum world width required before the third (yellow) runway is added.
+ * Yellow crosses blue, and the X plus red need about 4:3 of room, so
+ * square and portrait screens stay with two runways.
+ */
+export const YELLOW_RUNWAY_MIN_WIDTH = 125;
 
 // ---------------------------------------------------------------------------
 // Planes
@@ -122,7 +126,7 @@ export const PATH_MIN_SPACING = 1.2;
 // ---------------------------------------------------------------------------
 
 /** Strip size. Long and narrow-ish so it reads as a real runway. */
-export const RUNWAY_LENGTH = 40;
+export const RUNWAY_LENGTH = 50;
 export const RUNWAY_WIDTH = 5;
 
 /** Distance from the runway end to the threshold marker. */
@@ -141,15 +145,51 @@ export const LANDING_ANGLE_TOLERANCE = Math.PI / 3;
  */
 export const ANCHOR_RADIUS = RUNWAY_WIDTH;
 
+/**
+ * Before anchoring, the plane's flight along the snapped path is dry-run
+ * (see `anchorPath`). It must land with this much to spare, in distance
+ * (units) and heading (radians), inside `LANDING_RADIUS` and
+ * `LANDING_ANGLE_TOLERANCE`. The margin covers the small differences
+ * between the dry run and the real, frame-by-frame flight.
+ */
+export const ANCHOR_LANDING_MARGIN = 0.8;
+export const ANCHOR_HEADING_MARGIN = (8 * Math.PI) / 180;
+
 /** Touchdown speed as a fraction of cruise. */
 export const LANDING_SPEED_START = 0.8;
+
+/** Angle between the blue and yellow runways, which cross (40°). */
+export const CROSSING_ANGLE = (40 * Math.PI) / 180;
+/** Heading halfway between blue's and yellow's landing directions (NNE). */
+export const CROSSING_BISECTOR = (-60 * Math.PI) / 180;
 
 /**
  * Runway layout as fractions of the world size (CLAUDE.md responsiveness
  * rule). `heading` is the landing direction. `apronSide` puts the taxiway
  * and hangars on the runway's right (+1) or left (-1), looking along the
- * landing direction: red and blue face the middle of the field, yellow's
- * go north of its strip, clear of the red/blue hangars on narrow screens.
+ * landing direction.
+ *
+ * Red has an airfield of its own. Blue and yellow share one airport, like
+ * a real field with two intersecting runways: same centre, headings
+ * `CROSSING_ANGLE` apart, so the strips cross in a narrow X and both land
+ * roughly the same way (into the prevailing wind). Runways with the same
+ * centre are "crossing" runways (see `layoutRunways`). Each apron sits on
+ * its runway's outer side, where the other strip falls away behind the
+ * turnoff; the narrow wedge between the two far ends stays open grass:
+ *
+ *              blue ↗   ↗ yellow        (landing directions)
+ *        [B]      ╲   ╱                 [B] blue apron, NW of its strip
+ *                  ╲ ╱
+ *                   X
+ *                  ╱ ╲        [Y]       [Y] yellow apron, SE of its strip
+ *
+ * Red's apron faces the middle of the field.
+ *
+ * `narrow` overrides the position and apron side on screens too narrow for
+ * yellow (see `YELLOW_RUNWAY_MIN_WIDTH`). Red and blue's headings are
+ * almost exactly opposite, so there they become a pair of parallel runways
+ * side by side, aprons facing outwards: red lands south on the left, blue
+ * lands north on the right, and the approaches come from opposite ends.
  */
 export const RUNWAY_LAYOUT: ReadonlyArray<{
   color: RunwayColor;
@@ -157,11 +197,34 @@ export const RUNWAY_LAYOUT: ReadonlyArray<{
   fy: number;
   heading: number;
   apronSide: 1 | -1;
+  narrow?: { fx: number; fy: number; apronSide?: 1 | -1 };
 }> = [
-  // fy 0.72 (not 0.7) keeps the long diagonal strips clear of the stream.
-  { color: "red", fx: 0.25, fy: 0.72, heading: (-3 * Math.PI) / 4, apronSide: 1 },
-  { color: "blue", fx: 0.75, fy: 0.72, heading: -Math.PI / 4, apronSide: -1 },
-  { color: "yellow", fx: 0.5, fy: 0.3, heading: 0, apronSide: -1 },
+  // Lands a little west of south, on approach from the NNE over the open
+  // top-middle of the field: clear of the X's approaches from the SW, and
+  // the same room to approach on every screen width.
+  {
+    color: "red",
+    fx: 0.25,
+    fy: 0.6,
+    narrow: { fx: 0.3, fy: 0.55, apronSide: 1 },
+    heading: (100 * Math.PI) / 180,
+    apronSide: -1,
+  },
+  {
+    color: "blue",
+    fx: 0.71,
+    fy: 0.57,
+    narrow: { fx: 0.7, fy: 0.5, apronSide: 1 },
+    heading: CROSSING_BISECTOR - CROSSING_ANGLE / 2,
+    apronSide: -1,
+  },
+  {
+    color: "yellow",
+    fx: 0.71,
+    fy: 0.57,
+    heading: CROSSING_BISECTOR + CROSSING_ANGLE / 2,
+    apronSide: 1,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -180,6 +243,13 @@ export const RUNWAY_LAYOUT: ReadonlyArray<{
 
 /** `u` where the turnoff leaves the runway centreline. */
 export const RUNWAY_EXIT_U = -3;
+
+/**
+ * `RUNWAY_EXIT_U` for crossing runways (see `RUNWAY_LAYOUT`): just past the
+ * intersection, so the turnoff (on the outer side) clears the other strip
+ * and its shoulder. Hold point and stands move along by the same amount.
+ */
+export const CROSSING_EXIT_U = 2;
 
 /** Distance from the runway centreline to the parallel taxiway. */
 export const TAXIWAY_OFFSET = 6.5;
@@ -314,6 +384,85 @@ export const COLOR_UNLOCK_SCORES: Record<RunwayColor, number> = {
  */
 export const MAP_MARGIN = 12;
 
+// Airport grounds (see core/airports.ts) -----------------------------------
+
+/** The airside fence runs this far outside everything it encloses. */
+export const PERIMETER_MARGIN = 3;
+
+/** Terminal building footprint: length along its frontage, depth. */
+export const TERMINAL_LENGTH = 14;
+export const TERMINAL_DEPTH = 5;
+
+/** Gap from the fence to the terminal's airside front. */
+export const TERMINAL_GAP = 3;
+
+/** Control tower distance in front of the terminal (airside). */
+export const TOWER_SETBACK = 4;
+
+/** Car park beside the terminal: length along the frontage, depth. */
+export const CAR_PARK_LENGTH = 11;
+export const CAR_PARK_DEPTH = 8;
+
+/** One parking bay: width along the row, depth into the row. */
+export const CAR_BAY_WIDTH = 1.1;
+export const CAR_BAY_DEPTH = 2.3;
+
+// Countryside (see core/countryside.ts) -------------------------------------
+
+/**
+ * Fields, roads and woods cover this fraction of the scenery map (from its
+ * centre); past it the grass fades into the horizon on its own.
+ */
+export const COUNTRYSIDE_REACH = 0.62;
+
+/** Patchwork grid: rotation, and the range of field sizes. */
+export const FIELD_ANGLE = 0.21;
+export const FIELD_SIZE_MIN = 15;
+export const FIELD_SIZE_MAX = 27;
+
+/** Gap between neighbouring fields, where the hedgerows grow. */
+export const HEDGE_GAP = 1.4;
+
+/** Paved width of the country roads. */
+export const ROAD_WIDTH = 2.2;
+
+/** Roads keep at least this far from any airport's fence, terminal or car park. */
+export const ROAD_CLEARANCE = 4;
+
+/** Houses line the roads within this distance of the village centre. */
+export const VILLAGE_RADIUS = 17;
+
+// Road traffic (see core/cars.ts) ------------------------------------------
+
+/** Most cars driving at once (some are always out in the haze); parked ones don't count. */
+export const CAR_MAX = 20;
+
+/** Share of car park bays with a car in them when the world is built. */
+export const CAR_PARK_FILL = 0.55;
+
+/** How long a car stays parked before it backs out and leaves (seconds). */
+export const CAR_PARK_TIME_MIN = 30;
+export const CAR_PARK_TIME_MAX = 90;
+
+/** Speed limit in the car parks, and while backing out of a bay. */
+export const CAR_PARK_SPEED = 1.2;
+
+/** Seconds for a drawbridge's leaves to lift fully (or come back down). */
+export const BRIDGE_LIFT_TIME = 3;
+
+/** Seconds between new cars setting off (random in this range). */
+export const CAR_SPAWN_MIN = 1.5;
+export const CAR_SPAWN_MAX = 4;
+
+/** Typical cruising speed (units / second; planes fly at `PLANE_SPEED`). */
+export const CAR_SPEED = 3.4;
+
+/** Cars keep this far behind the car ahead in their lane. */
+export const CAR_FOLLOW_GAP = 2.2;
+
+/** Distance from the road's centre line to the middle of each lane. */
+export const CAR_LANE_OFFSET = 0.5;
+
 /** Fixed seed: the stream and trees look the same on every load and resize. */
 export const SCENERY_SEED = 0x5eed_a1e;
 
@@ -342,8 +491,8 @@ export const STREAM_WAVELENGTH = 90;
  */
 export const STREAM_BASE_FY = 0.05;
 
-/** Minimum gap between the river's outer bank and any airfield footprint. */
-export const STREAM_AIRFIELD_CLEARANCE = 6;
+/** Minimum gap between the river's outer bank and any airport fence, terminal or car park. */
+export const STREAM_AIRFIELD_CLEARANCE = 4;
 
 /** Sandy bank either side of the water, beyond the water's edge. */
 export const STREAM_BANK_WIDTH = 1.2;
@@ -351,8 +500,12 @@ export const STREAM_BANK_WIDTH = 1.2;
 /** Candidate trees per 1000 units² (before rejection / density thinning). */
 export const TREE_DENSITY = 0.8;
 
-/** No tree closer than this to any runway edge, taxiway or hangar. */
-export const TREE_RUNWAY_CLEARANCE = 8;
+/**
+ * No tree closer than this to any airport: its fence (which already runs
+ * `PERIMETER_MARGIN` outside the runways, taxiways and hangars), terminal or
+ * car park.
+ */
+export const TREE_RUNWAY_CLEARANCE = 2.5;
 
 /** No tree closer than this to the stream's outer bank (≥ canopy radius). */
 export const TREE_STREAM_CLEARANCE = 3.5;
@@ -384,20 +537,17 @@ export const BOAT_TYPES = {
   motorboat: { speed: 3.4, lane: 0.55 },
 } as const;
 
-/** Seconds between boat launches, picked at random in this range. */
-export const BOAT_SPAWN_MIN = 8;
-export const BOAT_SPAWN_MAX = 18;
-
-/** Most boats on the river at once. */
-export const BOAT_MAX = 3;
-
 /**
- * Boats sail the river from this far (× world height) off one side of the
- * playfield to the same distance off the other.
+ * Seconds between boat launches from the river's ends (far out in the
+ * haze), picked at random in this range.
  */
-export const BOAT_ROUTE_MARGIN = 0.4;
+export const BOAT_SPAWN_MIN = 10;
+export const BOAT_SPAWN_MAX = 22;
 
-/** Boats fade in/out over this distance at either end of their route. */
+/** Most boats on the river at once (the river runs the whole map width). */
+export const BOAT_MAX = 7;
+
+/** Boats also fade in/out over this distance at the river's very ends. */
 export const BOAT_FADE_DISTANCE = 8;
 
 // ---------------------------------------------------------------------------

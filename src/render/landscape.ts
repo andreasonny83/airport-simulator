@@ -1,5 +1,6 @@
 /**
- * Low-poly daytime landscape: faceted grass, a stream with sandy banks and
+ * Low-poly daytime landscape: faceted grass, the airports' grounds (fences,
+ * towers, terminals; see airportGrounds.ts), a stream with sandy banks and
  * the odd boat sailing along it, and thin-instanced trees.
  *
  * The layout comes from the pure `core/scenery.ts`; this file only turns it
@@ -19,18 +20,27 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import "@babylonjs/core/Meshes/thinInstanceMesh"; // side effect: mesh.thinInstance* API
 import type { Scene } from "@babylonjs/core/scene";
 import { SCENERY_SEED, STREAM_BANK_WIDTH } from "../config";
-import { createBoatTraffic, stepBoats, type BoatTraffic } from "../core/boats";
+import { bridgeDemand, createBoatTraffic, stepBoats, type BoatTraffic } from "../core/boats";
+import { createBridgeStates, openToBoats, stepBridges, type BridgeState } from "../core/bridges";
+import { carsOnBridges, createCarTraffic, stepCars, type CarTraffic } from "../core/cars";
+import type { Bridge } from "../core/countryside";
 import { lerp, mulberry32 } from "../core/math";
 import {
   buildScenery,
+  horizonFade,
   valueNoise,
+  type Bounds,
   type Scenery,
   type StreamPoint,
   type Tree,
   type TreeKind,
 } from "../core/scenery";
 import type { Runway, Vec2, WorldSize } from "../core/types";
+import { AirportGroundsFactory, type AirportView } from "./airportGrounds";
 import { BoatFleet } from "./boats";
+import { DrawbridgeFactory, type DrawbridgeView } from "./bridges";
+import { CarFleet } from "./cars";
+import { CountrysideFactory, type CountrysideView } from "./countryside";
 import { fromScene, toScene } from "./coords";
 import { CLEAR_COLOR } from "./scene";
 
@@ -68,6 +78,21 @@ const WATER_EMISSIVE = new Color3(0.05, 0.14, 0.22);
 export class Landscape {
   /** Everything built by `setWorld`, disposed on the next rebuild. */
   private meshes: Mesh[] = [];
+  /** Airport grounds (fence, tower, terminal…), rebuilt with the rest. */
+  private airports: AirportView[] = [];
+  private readonly airportFactory: AirportGroundsFactory;
+  /** Fields, roads, bridges and village, rebuilt with the rest. */
+  private countryside: CountrysideView | null = null;
+  private readonly countrysideFactory: CountrysideFactory;
+  /** Cars on the roads (rebuilt with them) and their meshes. */
+  private cars: CarTraffic | null = null;
+  private bridges: readonly Bridge[] = [];
+  /** Drawbridge state (lift, barriers) and meshes, one per bridge. */
+  private bridgeStates: BridgeState[] = [];
+  private bridgeViews: DrawbridgeView[] = [];
+  private readonly bridgeFactory: DrawbridgeFactory;
+  private bounds: Bounds | null = null;
+  private readonly carFleet: CarFleet;
 
   /** Boats on the river (rebuilt with it) and their meshes. */
   private traffic: BoatTraffic | null = null;
@@ -101,6 +126,10 @@ export class Landscape {
     this.waterMat.alpha = 0.9;
 
     this.fleet = new BoatFleet(scene, shadows);
+    this.airportFactory = new AirportGroundsFactory(scene, shadows);
+    this.countrysideFactory = new CountrysideFactory(scene, shadows);
+    this.carFleet = new CarFleet(scene, shadows);
+    this.bridgeFactory = new DrawbridgeFactory(scene, shadows);
   }
 
   /** (Re)build all scenery for a world size and runway layout. */
@@ -116,27 +145,47 @@ export class Landscape {
     );
     for (const mesh of this.meshes) mesh.isPickable = false;
 
-    // New river, new traffic: boats restart empty and set off again soon.
+    this.countryside?.dispose();
+    this.countryside = this.countrysideFactory.create(scenery.countryside, world, scenery.bounds);
+    const land = scenery.countryside;
+    this.bridges = land.bridges;
+    this.bridgeStates = createBridgeStates(land.bridges);
+    for (const view of this.bridgeViews) view.dispose();
+    this.bridgeViews = land.bridges.map((b) => this.bridgeFactory.create(b, world));
+    this.cars = createCarTraffic(land.network, scenery.airports, this.bridgeStates, scenery.bounds);
+    this.bounds = scenery.bounds;
+    for (const view of this.airports) view.dispose();
+    this.airports = scenery.airports.map((a, i) => this.airportFactory.create(a, world, i));
+
+    // New river, new traffic. Boats need to know where the drawbridges are.
     this.fleet.clear();
-    this.traffic = createBoatTraffic(scenery.stream, world);
+    const gates = land.bridges.map((b) => b.points[Math.floor(b.points.length / 2)]!);
+    this.traffic = createBoatTraffic(scenery.stream, world, gates);
     this.world = world;
   }
 
   /**
-   * Per-frame animation (water shimmer, boats). `time` is in seconds and
-   * stands still while the game is paused, so the boats stop too.
+   * Per-frame animation (water shimmer, boats, cars, drawbridges, windsocks). `time` is
+   * in seconds and stands still while the game is paused, so everything
+   * stops too.
    */
   update(time: number): void {
+    for (const airport of this.airports) airport.update(time);
     const pulse = 1 + 0.35 * Math.sin(time * 1.3) * Math.sin(time * 0.7 + 1);
     WATER_EMISSIVE.scaleToRef(pulse, this.waterMat.emissiveColor);
 
     // Clamped like the sim's dt, so a long frame can't teleport a boat.
     const dt = this.lastTime === null ? 0 : Math.min(0.1, Math.max(0, time - this.lastTime));
     this.lastTime = time;
-    if (this.traffic && this.world) {
-      stepBoats(this.traffic, dt);
-      this.fleet.sync(this.traffic, this.world, time);
-    }
+    if (!this.traffic || !this.cars || !this.world || !this.bounds) return;
+    // Drawbridges open for sailboats once no car is on them; boats and cars
+    // then wait for them (see core/bridges.ts).
+    stepBridges(this.bridgeStates, dt, bridgeDemand(this.traffic), carsOnBridges(this.cars));
+    stepBoats(this.traffic, dt, this.bridgeStates.map(openToBoats));
+    stepCars(this.cars, dt);
+    this.fleet.sync(this.traffic, this.world, time);
+    this.carFleet.sync(this.cars, this.bridges, this.world, this.bounds);
+    this.bridgeStates.forEach((state, i) => this.bridgeViews[i]?.update(state, time));
   }
 
   // -------------------------------------------------------------------------
@@ -168,7 +217,6 @@ export class Landscape {
     const positions = grass.getVerticesData(VertexBuffer.PositionKind);
     if (!positions) throw new Error("Grass mesh has no positions");
     const colors = new Float32Array((positions.length / 3) * 4);
-    const half = size / 2;
     const tmp = new Color3();
     const scenePoint = new Vector3();
 
@@ -178,7 +226,7 @@ export class Landscape {
       const lz = (positions[v * 3 + 2]! + positions[v * 3 + 5]! + positions[v * 3 + 8]!) / 3;
       scenePoint.set(lx + center.x, 0, lz + center.z);
       const p = fromScene(scenePoint, world);
-      grassColor(p, Math.max(Math.abs(lx), Math.abs(lz)) / half, tmp);
+      grassColor(p, horizonFade(p, bounds), tmp);
 
       for (let k = 0; k < 3; k++) {
         const o = (v + k) * 4;
@@ -408,9 +456,9 @@ function matte(name: string, diffuse: Color3, scene: Scene): StandardMaterial {
 
 /**
  * Colour of the grass facet at sim point `p`.
- * @param edge 0 at the map centre, 1 at its edge (Chebyshev distance).
+ * @param fade how far it has faded into the horizon (see `horizonFade`).
  */
-function grassColor(p: Vec2, edge: number, out: Color3): Color3 {
+function grassColor(p: Vec2, fade: number, out: Color3): Color3 {
   // Big soft patches of light/dark grass, plus fine per-facet jitter so
   // neighbouring triangles differ slightly (the "low-poly" sparkle).
   const patch = valueNoise(p.x / 45, p.y / 45) * 0.7 + valueNoise(p.x / 12, p.y / 12) * 0.3;
@@ -419,8 +467,6 @@ function grassColor(p: Vec2, edge: number, out: Color3): Color3 {
   const jitter = lerp(0.94, 1.04, valueNoise(p.x * 3.7, p.y * 3.7, 7));
   out.scaleToRef(jitter, out);
 
-  // Fade into the clear colour over the outer 35% of the map.
-  const fade = Math.min(1, Math.max(0, (edge - 0.65) / 0.35));
-  Color3.LerpToRef(out, GRASS_EDGE, fade * fade * (3 - 2 * fade), out);
+  Color3.LerpToRef(out, GRASS_EDGE, fade, out);
   return out;
 }

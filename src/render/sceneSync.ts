@@ -48,6 +48,13 @@ const PATH_WIDTH = 0.5;
 const PATH_ALPHA = 0.85;
 /** Height of the green anchor ring: on the ground, just over the runway paint. */
 const ANCHOR_RING_ALTITUDE = 0.2;
+/**
+ * The anchor ring confirms a locked path, then gets out of the way: fully
+ * visible for `ANCHOR_RING_HOLD` seconds, then fading out over
+ * `ANCHOR_RING_FADE` seconds. Redrawing and re-anchoring shows it again.
+ */
+export const ANCHOR_RING_HOLD = 2;
+export const ANCHOR_RING_FADE = 0.8;
 /** Height of a plane on the ground (sitting on its wheels on the runway). */
 const RUNWAY_ALTITUDE = 0.35;
 
@@ -60,8 +67,10 @@ interface PlaneView {
   /** The plane's model: root mesh plus its animated parts. */
   aircraft: AircraftRig;
   ring: Mesh;
-  /** Green ring on the threshold while this plane's path is anchored. */
+  /** Green ring on the threshold, briefly, once this plane's path anchors. */
   anchorRing: Mesh;
+  /** Seconds since the path anchored (ring's age), or null while unanchored. */
+  anchorAge: number | null;
   path: Mesh | null;
   /** `plane.pathVersion` the current path line was built from. */
   pathVersion: number;
@@ -107,7 +116,9 @@ export class SceneSync {
     fitShadowsToWorld(this.shadows, state.world);
     this.landscape.setWorld(state.world, state.runways);
     for (const view of this.runwayViews) view.dispose();
-    this.runwayViews = state.runways.map((r) => this.runwayFactory.create(r, state.world));
+    this.runwayViews = state.runways.map((r) =>
+      this.runwayFactory.create(r, state.world, state.runways),
+    );
     for (const view of this.airfieldViews) view.dispose();
     this.airfieldViews = state.runways.map((r) => this.airfieldFactory.create(r, state.world));
     this.boundary.setWorld(state.world);
@@ -139,6 +150,7 @@ export class SceneSync {
           aircraft,
           ring: this.factory.createWarningRing(`ring-${plane.id}`),
           anchorRing: this.factory.createAnchorRing(`anchor-${plane.id}`),
+          anchorAge: null,
           path: null,
           pathVersion: -1,
           yaw: null,
@@ -234,14 +246,23 @@ export class SceneSync {
     }
 
     // Anchor ring: sits on the threshold (the anchored path's last point)
-    // until the plane lands or the player redraws the path.
+    // as a short-lived confirmation, see ANCHOR_RING_HOLD. The age restarts
+    // whenever the path (re-)anchors; `dt` is 0 while paused, so a paused
+    // ring holds its fade.
     const anchorEnd = plane.pathAnchored ? plane.path[plane.path.length - 1] : undefined;
-    view.anchorRing.setEnabled(anchorEnd !== undefined);
-    if (anchorEnd) {
+    view.anchorAge = anchorEnd ? (view.anchorAge ?? -dt) + dt : null;
+    const fade =
+      view.anchorAge === null
+        ? 0
+        : 1 - Math.min(1, Math.max(0, view.anchorAge - ANCHOR_RING_HOLD) / ANCHOR_RING_FADE);
+    view.anchorRing.setEnabled(anchorEnd !== undefined && fade > 0);
+    if (anchorEnd && fade > 0) {
       toScene(anchorEnd, world, ANCHOR_RING_ALTITUDE, view.anchorRing.position);
       // Gentle breathing so it reads as "live" without competing with warnings.
       const s = 1 + 0.06 * Math.sin(time * 4);
       view.anchorRing.scaling.set(s, 1, s);
+      // Ease out (quadratic): the ring dims quickly at first, then lingers.
+      view.anchorRing.visibility = fade * fade;
     }
 
     if (view.pathVersion !== plane.pathVersion) this.rebuildPath(view, plane, world);

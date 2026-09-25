@@ -1,10 +1,11 @@
 /**
  * Static world pieces at real game scale: a single runway with its taxiway
- * and hangars, the whole airfield layout, and the landscape around it.
+ * and hangars, blue and yellow's crossing runways, the whole airfield
+ * layout, and the landscape around it.
  *
  * Tuning loop: runway markings/lights live in runway.ts, taxiways and
  * hangars in airfield.ts, the layout and sizes in config.ts (RUNWAY_*,
- * TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, AIRSPACE_MARGIN,
+ * CROSSING_*, TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, AIRSPACE_MARGIN,
  * MAP_MARGIN, ZOOM_MIN), colours in landscape.ts. Save and the story rebuilds. Boats have their own stories
  * in "Scene/River".
  */
@@ -12,6 +13,9 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import {
   COLOR_HEX,
+  CROSSING_ANGLE,
+  CROSSING_BISECTOR,
+  CROSSING_EXIT_U,
   RUNWAY_LENGTH,
   RUNWAY_THRESHOLD_INSET,
   RUNWAY_WIDTH,
@@ -100,6 +104,76 @@ export const SingleRunway: StoryObj<RunwayArgs> = {
 };
 
 // ---------------------------------------------------------------------------
+// Crossing runways
+// ---------------------------------------------------------------------------
+
+interface CrossingArgs {
+  /** Angle between the two runways (degrees). Game: CROSSING_ANGLE. */
+  angleDeg: number;
+  /** Heading halfway between the landing directions. Game: CROSSING_BISECTOR. */
+  bisectorDeg: number;
+  /** Where each turnoff leaves its runway. Game: CROSSING_EXIT_U. */
+  exitU: number;
+}
+
+/**
+ * Blue and yellow's shared airport close up: two runways crossing in an X,
+ * each apron on its runway's outer side. Shows how the intersection is
+ * painted (blue, listed first, keeps its centreline; edge lines and lights
+ * stop at the other strip). Drag to orbit, wheel to zoom. The controls
+ * override the CROSSING_* constants for quick experiments.
+ */
+export const CrossingRunways: StoryObj<CrossingArgs> = {
+  argTypes: {
+    angleDeg: { control: { type: "range", min: 20, max: 90, step: 5 } },
+    bisectorDeg: { control: { type: "range", min: -180, max: 180, step: 5 } },
+    exitU: { control: { type: "range", min: -5, max: 12, step: 0.5 } },
+  },
+  args: {
+    angleDeg: Math.round(CROSSING_ANGLE / DEG),
+    bisectorDeg: Math.round(CROSSING_BISECTOR / DEG),
+    exitU: CROSSING_EXIT_U,
+  },
+  render: (args) =>
+    mountStage((stage) => {
+      const factory = new MeshFactory(stage.scene);
+      const runwayFactory = new RunwayFactory(stage.scene, (c) => factory.material(c));
+      const airfields = new AirfieldFactory(stage.scene, (c) => factory.material(c), stage.shadows);
+      groundPad(stage, RUNWAY_LENGTH * 8);
+      // A world centred on the crossing, so toScene puts it at the origin.
+      const world = { width: 100, height: 100 };
+      const center = { x: 50, y: 50 };
+      const specs = [
+        { color: "blue", offset: -1, side: -1 },
+        { color: "yellow", offset: 1, side: 1 },
+      ] as const;
+      let nextStand = 0;
+      const runways: Runway[] = specs.map(({ color, offset, side }) => {
+        const heading = (args.bisectorDeg + (offset * args.angleDeg) / 2) * DEG;
+        const dir = headingVector(heading);
+        const back = RUNWAY_LENGTH / 2 - RUNWAY_THRESHOLD_INSET;
+        const airfield = layoutAirfield(color, center, heading, side, nextStand, args.exitU);
+        nextStand += airfield.stands.length;
+        return {
+          color,
+          center,
+          heading,
+          length: RUNWAY_LENGTH,
+          width: RUNWAY_WIDTH,
+          threshold: { x: center.x - dir.x * back, y: center.y - dir.y * back },
+          airfield,
+        };
+      });
+      const views = runways.map((r) => runwayFactory.create(r, world, runways));
+      for (const r of runways) airfields.create(r, world);
+      orbitCamera(stage, Vector3.Zero(), RUNWAY_LENGTH * 1.3);
+      return (_dt, time) => {
+        for (const view of views) view.update(time);
+      };
+    }),
+};
+
+// ---------------------------------------------------------------------------
 // Whole field
 // ---------------------------------------------------------------------------
 
@@ -124,7 +198,7 @@ export const RunwayLayout: StoryObj<AirfieldArgs> = {
       groundPad(stage, cam.world.width * 3);
       fitShadowsToWorld(stage.shadows, cam.world);
       const runways = layoutRunways(cam.world);
-      const views: RunwayView[] = runways.map((r) => runwayFactory.create(r, cam.world));
+      const views: RunwayView[] = runways.map((r) => runwayFactory.create(r, cam.world, runways));
       const airfields = new AirfieldFactory(stage.scene, (c) => factory.material(c), stage.shadows);
       for (const r of runways) airfields.create(r, cam.world);
       const boundary = new AirspaceBoundary(stage.scene);
@@ -139,8 +213,10 @@ export const RunwayLayout: StoryObj<AirfieldArgs> = {
 };
 
 /**
- * The full decorative landscape (grass, meandering stream placed clear of
- * the airfields, trees, passing boats) with the airfield.
+ * The full decorative landscape with the airfield: grass, farmland and
+ * woods, roads with cars and a bridge, the village, the airports' grounds
+ * (fences, towers, terminals), and the meandering stream with its boats.
+ * Close-ups of the new pieces live in "Scene/Countryside".
  */
 export const FullLandscape: StoryObj<AirfieldArgs> = {
   argTypes: fieldArgTypes,
@@ -154,7 +230,7 @@ export const FullLandscape: StoryObj<AirfieldArgs> = {
       const runways = layoutRunways(cam.world);
       const landscape = new Landscape(stage.scene, stage.shadows);
       landscape.setWorld(cam.world, runways);
-      const views = runways.map((r) => runwayFactory.create(r, cam.world));
+      const views = runways.map((r) => runwayFactory.create(r, cam.world, runways));
       const airfields = new AirfieldFactory(stage.scene, (c) => factory.material(c), stage.shadows);
       for (const r of runways) airfields.create(r, cam.world);
       const boundary = new AirspaceBoundary(stage.scene);

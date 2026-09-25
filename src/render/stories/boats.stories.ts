@@ -3,7 +3,7 @@
  *
  * Tuning loop: edit the models, colours or BOAT_SCALE in boats.ts,
  * or the traffic (BOAT_TYPES speeds/lanes, BOAT_SPAWN_*, BOAT_MAX,
- * BOAT_ROUTE_MARGIN, BOAT_FADE_DISTANCE) in config.ts, and the story
+ * BOAT_FADE_DISTANCE) in config.ts, and the story
  * hot-reloads.
  */
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
@@ -90,8 +90,8 @@ export const BoatModels: StoryObj<ModelArgs> = {
       // The scene origin is sim (50, 50); put one of each boat either side.
       const mid = 50 - RIVER_START_X;
       traffic.boats = [
-        { id: 1, kind: "sailboat", s: mid - 3, dir: 1 },
-        { id: 2, kind: "motorboat", s: mid + 3, dir: -1 },
+        { id: 1, kind: "sailboat", s: mid - 3, dir: 1, speed: 1.8 },
+        { id: 2, kind: "motorboat", s: mid + 3, dir: -1, speed: 3.4 },
       ];
       traffic.nextId = 3;
       orbitCamera(stage, new Vector3(0, 1, 0), 14);
@@ -139,7 +139,7 @@ export const RiverTraffic: StoryObj<TrafficArgs> = {
       const landscape = new Landscape(stage.scene, stage.shadows);
       landscape.setWorld(cam.world, runways);
       const runwayFactory = new RunwayFactory(stage.scene, (c) => factory.material(c));
-      const views = runways.map((r) => runwayFactory.create(r, cam.world));
+      const views = runways.map((r) => runwayFactory.create(r, cam.world, runways));
       const airfields = new AirfieldFactory(stage.scene, (c) => factory.material(c), stage.shadows);
       for (const r of runways) airfields.create(r, cam.world);
       return (dt, time) => {

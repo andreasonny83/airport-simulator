@@ -184,7 +184,7 @@ export function attachPointerInput(
     if (!point || !appendPathPoint(plane, point)) return;
     // Reached the runway from the right direction: the path snaps onto the
     // threshold and is finished, so this pointer stops routing the plane.
-    if (anchorPath(plane, state.runways)) release(e.pointerId);
+    if (anchorPath(plane, state.runways, state.world)) release(e.pointerId);
   };
 
   const onUp = (e: PointerEvent) => {

@@ -4,13 +4,14 @@
  *
  *   - Markers:  a frozen moment staged by hand: drawn path lines, a pair of
  *               planes close enough for warning rings, a path anchored
- *               onto a runway threshold (green ring), and two planes still
+ *               onto a runway threshold (green ring, re-anchored on a loop
+ *               so its hold-and-fade replays), and two planes still
  *               off-screen on their way in, with their arrival arrows. The
  *               sim doesn't run, but the render clock does, so rings pulse
  *               and wind blows.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
  *
- * Tuning loop: PATH_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
+ * Tuning loop: PATH_* / ANCHOR_RING_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
  * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
  * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, ARRIVAL_WARNING…) in config.ts.
  */
@@ -28,7 +29,7 @@ import { createHud } from "../../ui/hud";
 import { arrivalLayerMarkup } from "../../ui/hudMarkup";
 import { arrivalMarkers } from "../arrivals";
 import { MeshFactory } from "../meshes";
-import { SceneSync } from "../sceneSync";
+import { ANCHOR_RING_FADE, ANCHOR_RING_HOLD, SceneSync } from "../sceneSync";
 import { gameCamera, mountStage } from "./stage";
 
 const DEG = Math.PI / 180;
@@ -129,7 +130,17 @@ export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
       stageMarkers(state);
       stage.root.insertAdjacentHTML("beforeend", arrivalLayerMarkup());
       const arrows = createArrivalArrows(stage.root.querySelector<HTMLElement>("#arrivals")!);
+      // Re-anchor the approach every so often (unanchored for one frame), so
+      // the anchor ring's hold-and-fade plays again with a pause between.
+      const approach = state.planes.find((p) => p.pathAnchored);
+      const replayEvery = ANCHOR_RING_HOLD + ANCHOR_RING_FADE + 1.5;
+      let sinceAnchor = 0;
       return (dt, time) => {
+        if (approach) {
+          sinceAnchor += dt;
+          approach.pathAnchored = sinceAnchor < replayEvery;
+          if (!approach.pathAnchored) sinceAnchor = 0;
+        }
         cam.frame(dt, time);
         sync.syncPlanes(state, time);
         arrows.update(arrivalMarkers(state, stage.scene, stage.canvas));

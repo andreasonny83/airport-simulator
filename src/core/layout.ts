@@ -8,6 +8,7 @@
 import {
   AIRSPACE_MARGIN,
   CAMERA_FIT_PADDING,
+  CROSSING_EXIT_U,
   CAMERA_TILT,
   FLIGHT_ALTITUDE,
   RUNWAY_LAYOUT,
@@ -106,19 +107,38 @@ export function isInAirspace(p: Vec2, world: WorldSize): boolean {
   return p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
 }
 
-/** Build the runway list (each with its taxiway and hangars) for a world size. */
+/**
+ * Build the runway list (each with its taxiway and hangars) for a world size.
+ *
+ * Runways sharing a centre cross there (blue and yellow's X, see
+ * `RUNWAY_LAYOUT`). Their turnoffs move past the intersection, so no taxi
+ * route cuts across the other strip; rollouts still roll through it.
+ */
 export function layoutRunways(world: WorldSize): Runway[] {
   let nextStandId = 0;
-  return RUNWAY_LAYOUT.filter(
-    // Narrow (portrait) screens only get two runways, like the prototype.
-    (spec) => spec.color !== "yellow" || world.width >= YELLOW_RUNWAY_MIN_WIDTH,
-  ).map((spec) => {
+  // Narrow (portrait) screens only get two runways, like the prototype, and
+  // may move them (`narrow`) to use the extra height.
+  const narrow = world.width < YELLOW_RUNWAY_MIN_WIDTH;
+  const specs = RUNWAY_LAYOUT.filter((spec) => !narrow || spec.color !== "yellow").map((spec) =>
+    narrow && spec.narrow ? { ...spec, ...spec.narrow } : spec,
+  );
+  return specs.map((spec) => {
     const center = { x: world.width * spec.fx, y: world.height * spec.fy };
     const dir = headingVector(spec.heading);
     // The threshold sits near the runway end the plane arrives at, i.e.
     // *behind* the centre relative to the landing heading.
     const back = RUNWAY_LENGTH / 2 - RUNWAY_THRESHOLD_INSET;
-    const airfield = layoutAirfield(spec.color, center, spec.heading, spec.apronSide, nextStandId);
+    const crossing = specs.some(
+      (other) => other !== spec && other.fx === spec.fx && other.fy === spec.fy,
+    );
+    const airfield = layoutAirfield(
+      spec.color,
+      center,
+      spec.heading,
+      spec.apronSide,
+      nextStandId,
+      crossing ? CROSSING_EXIT_U : undefined,
+    );
     nextStandId += airfield.stands.length;
     return {
       color: spec.color,

@@ -172,6 +172,8 @@ export interface Stand {
  * sim coordinates, computed from the runway (see core/airfield.ts).
  */
 export interface Airfield {
+  /** Distance along the runway (from its centre) of `exit`. */
+  exitU: number;
   /** Point on the runway centreline where the turnoff leaves it. */
   exit: Vec2;
   /** Where the turnoff joins the parallel taxiway. */

@@ -51,6 +51,10 @@ export function runwayFrame(center: Vec2, heading: number, side: 1 | -1): Runway
 /**
  * Taxiway, stands and hangars for one runway. Stand ids start at
  * `firstStandId` so they stay unique across the whole field.
+ *
+ * @param exitU  `u` of the turnoff (see `RUNWAY_EXIT_U`). A later exit, as
+ *   on crossing runways (`CROSSING_EXIT_U`), slides the whole taxiway, hold
+ *   point and stands along by the same amount, so their spacing is kept.
  */
 export function layoutAirfield(
   color: RunwayColor,
@@ -58,12 +62,15 @@ export function layoutAirfield(
   heading: number,
   side: 1 | -1,
   firstStandId: number,
+  exitU: number = RUNWAY_EXIT_U,
 ): Airfield {
   const at = runwayFrame(center, heading, side);
   const into = at.sideHeading; // parked planes face away from the runway
+  const shift = exitU - RUNWAY_EXIT_U;
+  const standU = STAND_U.map((u) => u + shift);
 
   const hangarCenterV = HANGAR_DOOR_V + HANGAR_DEPTH / 2;
-  const stands: Stand[] = STAND_U.map((u, i) => ({
+  const stands: Stand[] = standU.map((u, i) => ({
     id: firstStandId + i,
     color,
     leadIn: at(u, TAXIWAY_OFFSET),
@@ -81,8 +88,8 @@ export function layoutAirfield(
 
   // Apron: paved from the taxiway's inner edge to the hangar doorways, spanning
   // every stand with a little margin either side.
-  const firstU = Math.min(...STAND_U) - HANGAR_WIDTH / 2 - 0.5;
-  const lastU = Math.max(...STAND_U) + HANGAR_WIDTH / 2 + 0.5;
+  const firstU = Math.min(...standU) - HANGAR_WIDTH / 2 - 0.5;
+  const lastU = Math.max(...standU) + HANGAR_WIDTH / 2 + 0.5;
   const apronInner = TAXIWAY_OFFSET - TAXIWAY_WIDTH / 2;
   const apronCenterU = (firstU + lastU) / 2;
   const apronCenterV = (apronInner + HANGAR_DOOR_V) / 2;
@@ -100,10 +107,11 @@ export function layoutAirfield(
   };
 
   return {
-    exit: at(RUNWAY_EXIT_U, 0),
+    exitU,
+    exit: at(exitU, 0),
     // A 45° turnoff: as far along as it is sideways.
-    turnoff: at(RUNWAY_EXIT_U + TAXIWAY_OFFSET, TAXIWAY_OFFSET),
-    hold: at(HOLD_U, TAXIWAY_OFFSET),
+    turnoff: at(exitU + TAXIWAY_OFFSET, TAXIWAY_OFFSET),
+    hold: at(HOLD_U + shift, TAXIWAY_OFFSET),
     taxiwayEnd: at(lastU, TAXIWAY_OFFSET),
     stands,
     apron: {

@@ -1,6 +1,6 @@
 /**
- * Procedural scenery layout: map bounds, a meandering river and scattered
- * trees.
+ * Procedural scenery layout: map bounds, airport grounds (see
+ * core/airports.ts), a meandering river and scattered trees.
  *
  * This is pure data (no Babylon) so it can be unit-tested like the rest of
  * core. It is decoration only: the simulation never reads it, so nothing
@@ -28,6 +28,9 @@ import {
   TREE_STREAM_CLEARANCE,
   ZOOM_MIN,
 } from "../config";
+import { layoutAirports, type Airport } from "./airports";
+import { buildCountryside, countrysideClear, type Countryside } from "./countryside";
+import { distanceToPolygon, rectCorners } from "./geometry";
 import { defaultViewBounds } from "./layout";
 import { headingVector, lerp, mulberry32 } from "./math";
 import type { OrientedRect, Rng, Runway, Vec2, WorldSize } from "./types";
@@ -62,6 +65,10 @@ export interface StreamPoint extends Vec2 {
 
 export interface Scenery {
   bounds: Bounds;
+  /** Airport grounds: fences, towers, terminals (built before everything else avoids them). */
+  airports: Airport[];
+  /** Roads, village, fields and woods. */
+  countryside: Countryside;
   /** Stream centreline, sampled left → right across the whole map. */
   stream: StreamPoint[];
   trees: Tree[];
@@ -110,6 +117,21 @@ export function mapBounds(world: WorldSize): Bounds {
   const cx = world.width / 2;
   const cy = world.height / 2;
   return { minX: cx - half, minY: cy - half, maxX: cx + half, maxY: cy + half };
+}
+
+/**
+ * How much of the way `p` has faded into the horizon, 0..1: nothing inside
+ * the inner 65% of the map, then easing to fully faded at its edge (by
+ * Chebyshev distance, so the map's square edge disappears evenly). The grass,
+ * roads and cars all fade by this, so they melt away together.
+ */
+export function horizonFade(p: Vec2, bounds: Bounds): number {
+  const half = (bounds.maxX - bounds.minX) / 2;
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cy = (bounds.minY + bounds.maxY) / 2;
+  const edge = Math.max(Math.abs(p.x - cx), Math.abs(p.y - cy)) / half;
+  const f = Math.min(1, Math.max(0, (edge - 0.65) / 0.35));
+  return f * f * (3 - 2 * f);
 }
 
 /**
@@ -207,21 +229,32 @@ export function streamCenterline(world: WorldSize, rng: Rng): StreamPoint[] {
 }
 
 /**
+ * Everything built on the ground at the airports, as polygons: each fenced
+ * airside, terminal and car park. Trees and the river keep clear of these.
+ */
+export function airportObstacles(airports: readonly Airport[]): Vec2[][] {
+  return airports.flatMap((a) => [
+    a.perimeter,
+    ...(a.landside ? [rectCorners(a.landside.terminal), rectCorners(a.landside.carPark)] : []),
+  ]);
+}
+
+/**
  * Move a centred stream (see `streamCenterline`) to its base line, shifted
  * up or down by the smallest amount that keeps every bank at least
- * `STREAM_AIRFIELD_CLEARANCE` from every airfield (runway, taxiway, hangars).
+ * `STREAM_AIRFIELD_CLEARANCE` from every airport (see `airportObstacles`).
  */
 export function placeStream(
   line: readonly StreamPoint[],
   world: WorldSize,
-  runways: readonly Runway[],
+  obstacles: readonly (readonly Vec2[])[],
 ): StreamPoint[] {
   const baseY = world.height * STREAM_BASE_FY;
   const clearAt = (y0: number) =>
     line.every((p) => {
       const q = { x: p.x, y: p.y + y0 };
       const reach = streamOuterHalfWidth(p) + STREAM_AIRFIELD_CLEARANCE;
-      return runways.every((r) => distanceToRunway(q, r.airfield.footprint) >= reach);
+      return obstacles.every((o) => distanceToPolygon(q, o) >= reach);
     });
 
   // Try 0, -1, +1, -2, +2, … so the river ends up as near its line as allowed.
@@ -323,9 +356,10 @@ export function treeDensity(p: Vec2, world: WorldSize): number {
  */
 export function scatterTrees(
   world: WorldSize,
-  runways: readonly Runway[],
+  obstacles: readonly (readonly Vec2[])[],
   stream: readonly StreamPoint[],
   rng: Rng,
+  land: Countryside | null = null,
 ): Tree[] {
   const b = mapBounds(world);
   const area = (b.maxX - b.minX) * (b.maxY - b.minY);
@@ -351,10 +385,8 @@ export function scatterTrees(
     const kind: TreeKind = rng() < TREE_CONIFER_SHARE ? "conifer" : "broadleaf";
     const keepRoll = rng();
 
-    // Keep the runway and its taxiway, apron and hangars clear.
-    if (runways.some((r) => distanceToRunway(pos, r.airfield.footprint) < TREE_RUNWAY_CLEARANCE)) {
-      continue;
-    }
+    // Keep the airports clear: runways, taxiways, hangars, fences, terminals.
+    if (obstacles.some((o) => distanceToPolygon(pos, o) < TREE_RUNWAY_CLEARANCE)) continue;
     // Cheap band test first, so most points skip the full polyline check.
     if (
       pos.y > bandMin &&
@@ -364,7 +396,19 @@ export function scatterTrees(
       continue;
     }
     if (keepRoll >= treeDensity(pos, world)) continue;
+    // Not in the crops, on the roads or in the village.
+    if (land && !countrysideClear(pos, land)) continue;
 
+    trees.push({ kind, pos, scale, rotation, tint });
+  }
+
+  // Woods and hedgerow trees, planted where the countryside put them.
+  for (const pos of land?.woodland ?? []) {
+    const scale = lerp(TREE_SCALE_MIN, TREE_SCALE_MAX, rng());
+    const rotation = rng() * Math.PI * 2;
+    const tint = rng();
+    const kind: TreeKind = rng() < TREE_CONIFER_SHARE ? "conifer" : "broadleaf";
+    if (obstacles.some((o) => distanceToPolygon(pos, o) < TREE_RUNWAY_CLEARANCE)) continue;
     trees.push({ kind, pos, scale, rotation, tint });
   }
   return trees;
@@ -380,7 +424,11 @@ export function scatterTrees(
  */
 export function buildScenery(world: WorldSize, runways: readonly Runway[]): Scenery {
   const rng = mulberry32(SCENERY_SEED);
-  const stream = placeStream(streamCenterline(world, rng), world, runways);
-  const trees = scatterTrees(world, runways, stream, rng);
-  return { bounds: mapBounds(world), stream, trees };
+  const airports = layoutAirports(runways, world);
+  const obstacles = airportObstacles(airports);
+  const stream = placeStream(streamCenterline(world, rng), world, obstacles);
+  const bounds = mapBounds(world);
+  const countryside = buildCountryside(world, bounds, airports, obstacles, stream);
+  const trees = scatterTrees(world, obstacles, stream, rng, countryside);
+  return { bounds, airports, countryside, stream, trees };
 }
