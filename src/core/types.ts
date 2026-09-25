@@ -31,7 +31,8 @@ export type RunwayColor = "red" | "blue" | "yellow";
  *                stopping.
  * - `landed`   : inside the hangar; pruned from state at the end of the step.
  * - `departing`: sent off the field by the player; flies straight on out of
- *                view, no longer steerable and can't collide.
+ *                view and can't collide. Still steerable: a new path calls
+ *                it back into play (see `isSteerable` in core/path.ts).
  * - `departed` : past the scenery map edge; pruned like `landed`, no score.
  *
  * Every phase from `landing` to `landed` is "on the ground" (see
@@ -92,8 +93,9 @@ export interface Plane {
   /**
    * True from the spawn until the plane first crosses into the airspace.
    * New planes start off-screen and fly straight in (see core/spawner.ts);
-   * meanwhile the HUD shows an arrow on the screen edge, and the plane
-   * can't collide (nobody could see it coming) or be given a path.
+   * meanwhile the HUD shows an arrow on the screen edge. Like every plane
+   * outside the airspace it can't collide (see core/collision.ts), but the
+   * player may already grab it and give it a path.
    */
   inbound: boolean;
 }

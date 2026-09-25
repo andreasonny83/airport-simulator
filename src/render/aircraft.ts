@@ -374,6 +374,10 @@ function light(
   material: Material,
 ): Mesh {
   const box = CreateBox(role, { size }, scene);
+  // Place the box at its model-space spot first: `attach` bakes this into the
+  // vertices and then re-centres them on `at`. Left at the origin, every lamp
+  // would collapse onto its parent's pivot (fuselage centre / wing root).
+  box.position.copyFrom(at);
   return attach([box], parent, parentPivot, at, { role }, material);
 }
 

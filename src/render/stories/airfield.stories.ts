@@ -40,7 +40,7 @@ interface AirfieldArgs {
   rotationDeg: number;
   /** Camera zoom, as the "+" / "−" buttons set it (ZOOM_MIN–2.5). */
   zoom: number;
-  /** Show the airspace edge (normally only visible while a drag pushes past it). */
+  /** Show the airspace edge (normally only visible while a path is dragged past it). */
   showBoundary: boolean;
 }
 

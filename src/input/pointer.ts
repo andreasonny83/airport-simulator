@@ -15,7 +15,7 @@ import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { PLANE_GRAB_RADIUS } from "../config";
 import { distance } from "../core/math";
-import { anchorPath, appendPathPoint, clampPathPoint, startPath } from "../core/path";
+import { anchorPath, appendPathPoint, clampPathPoint, isSteerable, startPath } from "../core/path";
 import { isInAirspace } from "../core/layout";
 import type { GameState, Plane, Vec2 } from "../core/types";
 import { fromScene } from "../render/coords";
@@ -45,12 +45,12 @@ function screenToWorld(
   return fromScene(ray.origin.add(ray.direction.scale(t)), state.world);
 }
 
-/** Closest flying plane within grab range of `point`, if any. */
+/** Closest steerable plane (see `isSteerable`) within grab range of `point`, if any. */
 function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
   let best: Plane | null = null;
   let bestDist = PLANE_GRAB_RADIUS;
   for (const plane of planes) {
-    if (plane.phase !== "flying") continue;
+    if (!isSteerable(plane)) continue;
     const d = distance(plane.pos, point);
     if (d < bestDist) {
       best = plane;
@@ -61,10 +61,10 @@ function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
 }
 
 /**
- * Hooks out of pointer input. The edge hooks tell the player why a path
- * stopped growing: paths can't be drawn past the edge of the field (see
- * core/path.ts `clampPathPoint`), and without feedback a clipped line looks
- * like a bug.
+ * Hooks out of pointer input. Paths may be drawn anywhere on the map, past
+ * the airspace border included; the edge hook lets the scene show where the
+ * border is while a path is drawn beyond it, since outside it planes can't
+ * collide (see core/collision.ts).
  */
 export interface PointerFeedback {
   /**
@@ -72,9 +72,7 @@ export interface PointerFeedback {
    * Without this hook, drags that miss a plane do nothing.
    */
   onPan?: (dx: number, dy: number) => void;
-  /** A drag pushed past the edge. Fires once per drag, on the first push. */
-  onEdgeBlocked?: (plane: Plane) => void;
-  /** Whether any drag currently has its pointer past the edge. */
+  /** Whether any path drag currently has its pointer past the airspace edge. */
   onEdgeHover?: (active: boolean) => void;
 }
 
@@ -91,9 +89,7 @@ export function attachPointerInput(
 ): () => void {
   /** pointerId → id of the plane that pointer is routing. */
   const active = new Map<number, number>();
-  /** Pointers whose drag has already hit the edge (warn once per drag). */
-  const warned = new Set<number>();
-  /** Pointers currently past the edge mid-drag. */
+  /** Pointers currently past the airspace edge mid-drag. */
   const outside = new Set<number>();
   /**
    * The one pointer dragging the map, and where it was last seen (canvas
@@ -113,7 +109,6 @@ export function attachPointerInput(
   /** Stop routing: forget the pointer and clear its edge state. */
   const release = (pointerId: number) => {
     active.delete(pointerId);
-    warned.delete(pointerId);
     setOutside(pointerId, false);
   };
 
@@ -158,7 +153,7 @@ export function attachPointerInput(
     const state = getState();
     const plane = state.planes.find((p) => p.id === planeId);
     // Plane landed/crashed/removed mid-drag: stop routing it.
-    if (!plane || plane.phase !== "flying" || state.phase !== "playing") {
+    if (!plane || !isSteerable(plane) || state.phase !== "playing") {
       release(e.pointerId);
       return;
     }
@@ -166,22 +161,13 @@ export function attachPointerInput(
     const hit = screenToWorld(scene, camera, state, x, y);
     if (!hit) return;
 
-    // Paths stop at the edge of the field (see clampPathPoint). Tell the
-    // player, once per drag, so the clipped line doesn't look broken.
-    // An inbound plane grabbed before it has flown in starts outside, so the
-    // pointer does too: that's not a path hitting the edge. The border still
-    // shows (it's where the path can start), but hold the notice until the
-    // path has begun.
-    const pastEdge = !isInAirspace(hit, state.world);
-    const flyingIn = plane.inbound && plane.path.length === 0;
-    setOutside(e.pointerId, pastEdge);
-    if (pastEdge && !flyingIn && !warned.has(e.pointerId)) {
-      warned.add(e.pointerId);
-      feedback.onEdgeBlocked?.(plane);
-    }
+    // Show the airspace border while the path runs outside it: out there
+    // the plane is in the no-collision zone (see core/collision.ts).
+    setOutside(e.pointerId, !isInAirspace(hit, state.world));
 
-    const point = clampPathPoint(plane, hit, state.world);
-    if (!point || !appendPathPoint(plane, point)) return;
+    // Anywhere on the map is fair game; only the map's own edge clamps.
+    const point = clampPathPoint(hit, state.world);
+    if (!appendPathPoint(plane, point)) return;
     // Reached the runway from the right direction: the path snaps onto the
     // threshold and is finished, so this pointer stops routing the plane.
     if (anchorPath(plane, state.runways, state.world)) release(e.pointerId);

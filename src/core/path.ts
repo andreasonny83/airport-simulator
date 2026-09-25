@@ -11,13 +11,27 @@ import {
   PATH_MIN_SPACING,
   PLANE_SPEED,
 } from "../config";
-import { airspaceBounds, isInAirspace } from "./layout";
-import { angleDelta, distance } from "./math";
+import { angleDelta, clamp, distance } from "./math";
 import { updatePlane } from "./plane";
+import { mapBounds } from "./scenery";
 import type { Plane, Runway, Vec2, WorldSize } from "./types";
 
-/** Begin drawing a new path for `plane`, discarding the old one. */
+/**
+ * True if the player can steer `plane`: flying, or departing. A departing
+ * plane (its path ran out past the airspace border, heading out; see
+ * core/plane.ts) is still on the map and still the player's to call back,
+ * so paths can be drawn for planes anywhere on the map.
+ */
+export function isSteerable(plane: Plane): boolean {
+  return plane.phase === "flying" || plane.phase === "departing";
+}
+
+/**
+ * Begin drawing a new path for `plane`, discarding the old one. A departing
+ * plane is called back into play.
+ */
 export function startPath(plane: Plane): void {
+  if (plane.phase === "departing") plane.phase = "flying";
   plane.path = [];
   plane.pathAnchored = false;
   plane.pathVersion++;
@@ -40,43 +54,27 @@ export function appendPathPoint(
   if (plane.pathAnchored) return false;
   const last = plane.path[plane.path.length - 1] ?? plane.pos;
   if (distance(last, point) < minSpacing) return false;
+  // The plane can catch up with the pointer mid-drag and, past the border,
+  // start departing (see `isSteerable`). The drag is still steering it, so
+  // the new point brings it back into play.
+  if (plane.phase === "departing") plane.phase = "flying";
   plane.path.push({ x: point.x, y: point.y });
   plane.pathVersion++;
   return true;
 }
 
 /**
- * Keep drawn paths inside the airspace (see `airspaceBounds`). Paths can't
- * go past its edge: a plane
- * is sent off the world by drawing up to the border, and it then flies on
- * straight (see `departing` in core/plane.ts).
- *
- * Looks at the segment from the path's current end (or the plane itself)
- * to the pointer's `point`:
- * - `point` inside the airspace: returned unchanged;
- * - the segment leaves the airspace: the point where it crosses the border, so
- *   the line ends exactly on the edge. Further drags outside clip to that
- *   same point, which `appendPathPoint`'s spacing check then drops;
- * - both ends outside (e.g. a plane that has only just spawned): null.
- *
- * Once the pointer comes back inside, drawing carries on from the border.
+ * Keep a drawn path point on the map (see `mapBounds`). Paths may run
+ * anywhere the player can see, past the airspace border included: out there
+ * planes can't collide (see core/collision.ts), so the border is a safe
+ * holding area rather than a wall. Only the map's own edge is a limit, so a
+ * path never leads a plane off the scenery. A plane whose path ends past the
+ * airspace border, heading out, leaves the world (see `departing` in
+ * core/plane.ts).
  */
-export function clampPathPoint(plane: Plane, point: Vec2, world: WorldSize): Vec2 | null {
-  if (isInAirspace(point, world)) return { x: point.x, y: point.y };
-  const from = plane.path[plane.path.length - 1] ?? plane.pos;
-  if (!isInAirspace(from, world)) return null;
-
-  // Walk from `from` towards `point` and stop at the first border hit: the
-  // smallest fraction t at which x or y reaches its limit.
-  const b = airspaceBounds(world);
-  const dx = point.x - from.x;
-  const dy = point.y - from.y;
-  let t = 1;
-  if (dx > 0) t = Math.min(t, (b.maxX - from.x) / dx);
-  if (dx < 0) t = Math.min(t, (b.minX - from.x) / dx);
-  if (dy > 0) t = Math.min(t, (b.maxY - from.y) / dy);
-  if (dy < 0) t = Math.min(t, (b.minY - from.y) / dy);
-  return { x: from.x + dx * t, y: from.y + dy * t };
+export function clampPathPoint(point: Vec2, world: WorldSize): Vec2 {
+  const b = mapBounds(world);
+  return { x: clamp(point.x, b.minX, b.maxX), y: clamp(point.y, b.minY, b.maxY) };
 }
 
 /**

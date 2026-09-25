@@ -54,14 +54,9 @@ const hud = createHud(document.body, {
 attachPointerInput(canvas, scene, cameraController.camera, () => state, {
   // Dragging empty ground grabs the map.
   onPan: (dx, dy) => cameraController.dragBy(dx, dy),
-  // Paths can't be drawn past the edge: show the border and say why.
+  // Paths may run past the airspace edge: show the border (outside it
+  // planes can't collide) while a drag is beyond it.
   onEdgeHover: (active) => sceneSync.setEdgeHighlight(active),
-  onEdgeBlocked: (plane) =>
-    hud.showToast(
-      plane.canDepart
-        ? "Paths end at the edge — plane will fly off"
-        : "Land this one — it can't leave",
-    ),
 });
 
 // Arrow keys pan the map (held keys are polled in the render loop).

@@ -106,7 +106,7 @@ export class SceneSync {
     this.boundary = new AirspaceBoundary(scene);
   }
 
-  /** Show the airspace border while a drag is pressing past it. */
+  /** Show the airspace border while a path drag is past it (the no-collision zone). */
   setEdgeHighlight(active: boolean): void {
     this.boundary.setActive(active);
   }

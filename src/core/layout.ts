@@ -43,8 +43,9 @@ export function safeViewAspect(aspect: number): number {
 
 /**
  * The airspace: the runway field grown by `AIRSPACE_MARGIN` on every side.
- * Paths are clipped to it, planes fly in across its edge (see
- * core/spawner.ts), and a plane steered past it leaves the world.
+ * Planes fly in across its edge (see core/spawner.ts), only planes inside it
+ * can collide (see core/collision.ts), and a plane whose path ends past it,
+ * heading out, leaves the world. Paths themselves may run anywhere on the map.
  *
  * The far/near margin is stretched by 1 / cos(tilt): the camera
  * foreshortens ground depth by cos(tilt), so on screen the gap round the

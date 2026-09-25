@@ -35,6 +35,11 @@ export function headingVector(heading: number): Vec2 {
   return { x: Math.cos(heading), y: Math.sin(heading) };
 }
 
+/** `v` limited to the range [lo, hi]. */
+export function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
 /** Linear interpolation between `a` and `b` by `t` (0 → a, 1 → b). */
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;

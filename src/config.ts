@@ -43,7 +43,7 @@ export const CAMERA_TILT = 0.9;
 export const CAMERA_FIT_PADDING = 1.04;
 
 /**
- * The airspace (where planes fly and paths can be drawn) is the runway field
+ * The airspace (where planes are in play and can collide) is the runway field
  * grown by this much on every side. Measured as seen on screen: the far and
  * near sides get `AIRSPACE_MARGIN / cos(CAMERA_TILT)` of ground, which the
  * tilt foreshortens back to the same on-screen gap as the left and right.

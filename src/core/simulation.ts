@@ -8,7 +8,8 @@
  *                paths, ones on the ground along their taxi routes
  *   3. land    – planes over a matching threshold touch down and get a
  *                ground route; a landing may open a new runway colour
- *   4. collide – any remaining flying planes that overlap end the game
+ *   4. collide – any remaining flying planes that overlap inside the
+ *                airspace end the game (outside it they never collide)
  *   5. prune   – planes stowed in a hangar, or flown off the world, are
  *                removed
  */
@@ -90,7 +91,7 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
   }
 
   // 4. Collide.
-  const { crash, warnings } = detectCollisions(state.planes);
+  const { crash, warnings } = detectCollisions(state.planes, state.world);
   for (const plane of state.planes) plane.warning = warnings.has(plane.id);
   if (crash) {
     const [a, b] = crash;

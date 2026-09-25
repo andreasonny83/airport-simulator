@@ -15,7 +15,7 @@ import {
   TURN_RESPONSE,
   WAYPOINT_CAPTURE_RADIUS,
 } from "../config";
-import { angleDelta, distance, normalizeAngle } from "./math";
+import { angleDelta, clamp, distance, normalizeAngle } from "./math";
 import { airspaceBounds, isInAirspace } from "./layout";
 import { mapBounds } from "./scenery";
 import type { Plane, RunwayColor, Vec2, WorldSize } from "./types";
@@ -215,8 +215,4 @@ function steer(plane: Plane, desired: number, dt: number): void {
   const command = clamp(error * TURN_RESPONSE, -MAX_TURN_RATE, MAX_TURN_RATE);
   plane.turnRate += (command - plane.turnRate) * (1 - Math.exp(-dt / TURN_LAG));
   plane.heading = normalizeAngle(plane.heading + plane.turnRate * dt);
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, v));
 }

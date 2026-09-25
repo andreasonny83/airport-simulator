@@ -136,10 +136,5 @@ export const Toast: Story = {
   args: { phase: "playing", score: 3, toast: "BLUE runway open", toastColor: "blue" },
 };
 
-/** Edge-drag notice: the same toast, untinted. */
-export const EdgeNotice: Story = {
-  args: { phase: "playing", score: 5, toast: "Paths end at the edge — plane will fly off" },
-};
-
 /** Crash overlay with the final score. */
 export const GameOver: Story = { args: { phase: "gameover", score: 27 } };

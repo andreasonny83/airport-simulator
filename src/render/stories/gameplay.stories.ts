@@ -187,12 +187,6 @@ export const LiveGame: StoryObj<LiveArgs> = {
       });
       attachPointerInput(stage.canvas, stage.scene, cam.controller.camera, () => state, {
         onEdgeHover: (active) => sync.setEdgeHighlight(active),
-        onEdgeBlocked: (plane) =>
-          hud.showToast(
-            plane.canDepart
-              ? "Paths end at the edge — plane will fly off"
-              : "Land this one — it can't leave",
-          ),
       });
       if (args.autoStart) begin();
 

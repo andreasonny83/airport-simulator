@@ -1,8 +1,9 @@
 /**
  * Airspace boundary: a dashed outline around the airspace that fades in
- * while the player tries to drag a path past the edge. Paths stop at the
- * border (see core/path.ts `clampPathPoint`), so showing where it is makes
- * the clipped line read as a rule rather than a glitch.
+ * while the player drags a path past the edge. Paths may run anywhere on the
+ * map, but only planes inside the border can collide (see
+ * core/collision.ts), so showing where it is tells the player where the
+ * no-collision holding area begins.
  */
 import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
