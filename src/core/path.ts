@@ -18,7 +18,7 @@ import type { Plane, Runway, Vec2, WorldSize } from "./types";
 
 /**
  * True if the player can steer `plane`: flying, or departing. A departing
- * plane (its path ran out past the airspace border, heading out; see
+ * plane (its path ran out past the airspace edge, heading out; see
  * core/plane.ts) is still on the map and still the player's to call back,
  * so paths can be drawn for planes anywhere on the map.
  */
@@ -54,7 +54,7 @@ export function appendPathPoint(
   if (plane.pathAnchored) return false;
   const last = plane.path[plane.path.length - 1] ?? plane.pos;
   if (distance(last, point) < minSpacing) return false;
-  // The plane can catch up with the pointer mid-drag and, past the border,
+  // The plane can catch up with the pointer mid-drag and, past the edge,
   // start departing (see `isSteerable`). The drag is still steering it, so
   // the new point brings it back into play.
   if (plane.phase === "departing") plane.phase = "flying";
@@ -65,12 +65,13 @@ export function appendPathPoint(
 
 /**
  * Keep a drawn path point on the map (see `mapBounds`). Paths may run
- * anywhere the player can see, past the airspace border included: out there
- * planes can't collide (see core/collision.ts), so the border is a safe
- * holding area rather than a wall. Only the map's own edge is a limit, so a
- * path never leads a plane off the scenery. A plane whose path ends past the
- * airspace border, heading out, leaves the world (see `departing` in
- * core/plane.ts).
+ * anywhere the player can see, past the airspace edge included: out there
+ * planes can't collide (see core/collision.ts) and the automatic avoidance
+ * keeps them apart (core/avoidance.ts), so the countryside round the field
+ * is a safe holding area rather than a wall. Only the map's own edge is a
+ * limit, so a path never leads a plane off the scenery. A plane whose path
+ * ends past the airspace edge, heading out, leaves the world (see
+ * `departing` in core/plane.ts).
  */
 export function clampPathPoint(point: Vec2, world: WorldSize): Vec2 {
   const b = mapBounds(world);
@@ -151,6 +152,8 @@ function landsOnSnappedPath(
     path: path.map((p) => ({ ...p })),
     pathAnchored: true,
     ground: null,
+    // A fresh avoidance turn is only worked out by `step`; fly the path as drawn.
+    avoidTurn: 0,
   };
 
   // Time budget: the whole path at cruise speed, doubled for turns.

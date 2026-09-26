@@ -21,11 +21,19 @@
  *               the approach, flares, taxis to a stand. Its model scales
  *               with height (ALTITUDE_SCALE_PER_UNIT), so it shrinks on
  *               the way down and is smallest on the ground.
- *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
+ *   - OuterTraffic: planes crossing paths outside the airspace (magenta
+ *               dashed edge), flown by the real flight model with the
+ *               automatic collision avoidance on or off: head-on, crossing
+ *               and converging arrivals all swerve apart, then resume
+ *               course. Replays on a loop.
+ *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion
+ *               (`showAirspace` draws the airspace edge).
  *
  * Tuning loop: PATH_* / ANCHOR_RING_* / HOVER_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
  * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
- * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, ARRIVAL_WARNING…) in config.ts.
+ * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, VIEW_MARGIN, ARRIVAL_WARNING…)
+ * in config.ts. Outer traffic: AVOID_SEPARATION / AVOID_LOOKAHEAD /
+ * AVOID_MAX_TURN in config.ts, the manoeuvre itself in core/avoidance.ts.
  * Crash: CRASH_ZOOM / CRASH_FRAME_LIFT / CRASH_ORBIT_* / CRASH_OVERLAY_DELAY in config.ts,
  * WRECK_* / DEBRIS_* / FLASH_* / SCORCH_* / SMOKE_DRIFT and the particle
  * set-ups in crash.ts, FOCUS_EASE_RATE in camera.ts, CRASH_BACKDROP in
@@ -45,10 +53,11 @@ import {
   ZOOM_MIN,
   ZOOM_STEP,
 } from "../../config";
-import { airspaceBounds, isInAirspace } from "../../core/layout";
 import { headingVector, mulberry32 } from "../../core/math";
 import { anchorPath, appendPathPoint } from "../../core/path";
-import { createPlane } from "../../core/plane";
+import { resolveOuterTraffic } from "../../core/avoidance";
+import { airspaceBounds, isInAirspace } from "../../core/layout";
+import { createPlane, updatePlane } from "../../core/plane";
 import { startGame, step, togglePause } from "../../core/simulation";
 import { pickSpawn } from "../../core/spawner";
 import { createGameState } from "../../core/state";
@@ -139,6 +148,7 @@ function stageMarkers(state: GameState): void {
     const spec = pickSpawn(world, state.viewAspect, ["red", "blue", "yellow"], rng);
     const inbound = createPlane(id, spec.color, spec.pos, spec.heading);
     inbound.inbound = true;
+    inbound.entry = spec.entry;
     planes.push(inbound);
   }
 
@@ -353,6 +363,99 @@ export const Landing: StoryObj<LandingArgs> = {
 };
 
 // ---------------------------------------------------------------------------
+// Outer traffic (automatic collision avoidance outside the airspace)
+// ---------------------------------------------------------------------------
+
+interface OuterTrafficArgs {
+  /** Run the automatic avoidance (core/avoidance.ts); off, they fly through each other. */
+  avoidance: boolean;
+  /** Seconds before the encounters replay. */
+  replayAfter: number;
+  timeScale: number;
+}
+
+/**
+ * Three encounters in the countryside round the airspace, each timed so
+ * the planes would meet if nobody swerved:
+ *
+ * - head-on: two departures flying at each other above the field;
+ * - crossing: two departures meeting at right angles left of it;
+ * - converging: two arrivals whose tracks to the right-hand edge cross.
+ */
+function stageOuterTraffic(state: GameState): void {
+  const b = airspaceBounds(state.world);
+  const planes: Plane[] = [];
+  const add = (color: Plane["color"], pos: Vec2, heading: number): Plane => {
+    const plane = createPlane(state.nextPlaneId++, color, pos, heading);
+    planes.push(plane);
+    return plane;
+  };
+  const depart = (color: Plane["color"], pos: Vec2, heading: number) => {
+    add(color, pos, heading).phase = "departing";
+  };
+  const arrive = (color: Plane["color"], pos: Vec2, entry: Vec2) => {
+    const plane = add(color, pos, Math.atan2(entry.y - pos.y, entry.x - pos.x));
+    plane.inbound = true;
+    plane.entry = entry;
+  };
+
+  // Head-on, above the field: 50 units apart, closing at twice cruise speed.
+  const topY = b.minY - 12;
+  const midX = (b.minX + b.maxX) / 2;
+  depart("red", { x: midX - 25, y: topY }, 0);
+  depart("blue", { x: midX + 25, y: topY }, Math.PI);
+
+  // Crossing at right angles left of the field, both reaching the same
+  // point at the same moment.
+  const leftX = b.minX - 12;
+  const meetY = (b.minY + b.maxY) / 2;
+  depart("yellow", { x: leftX, y: meetY - 22 }, Math.PI / 2);
+  depart("red", { x: leftX - 22, y: meetY }, 0);
+
+  // Converging arrivals right of the field, tracks crossing halfway in.
+  const farX = b.maxX + 24;
+  arrive("blue", { x: farX, y: meetY + 16 }, { x: b.maxX, y: meetY - 6 });
+  arrive("yellow", { x: farX, y: meetY - 16 }, { x: b.maxX, y: meetY + 6 });
+
+  state.planes = planes;
+}
+
+export const OuterTraffic: StoryObj<OuterTrafficArgs> = {
+  argTypes: {
+    replayAfter: { control: { type: "range", min: 4, max: 20, step: 0.5 } },
+    timeScale: { control: { type: "range", min: 0.1, max: 3, step: 0.05 } },
+  },
+  args: { avoidance: true, replayAfter: 8, timeScale: 1 },
+  render: (args) =>
+    mountStage((stage) => {
+      const cam = gameCamera(stage);
+      const state = createGameState(stage.aspect());
+      const sync = new SceneSync(stage.scene, new MeshFactory(stage.scene), stage.shadows);
+      sync.rebuildWorld(state);
+      sync.setAirspaceVisible(true);
+      stageOuterTraffic(state);
+
+      let time = 0;
+      let sinceStart = 0;
+      return (dt) => {
+        time += dt;
+        sinceStart += dt;
+        // The sim's move step on its own (see `step`): no spawns, landings
+        // or crashes to get in the way.
+        if (args.avoidance) resolveOuterTraffic(state.planes, state.world);
+        for (const plane of state.planes) updatePlane(plane, dt, state.world);
+        state.planes = state.planes.filter((p) => p.phase !== "departed");
+        if (sinceStart >= args.replayAfter) {
+          sinceStart = 0;
+          stageOuterTraffic(state); // new plane ids: fresh meshes
+        }
+        cam.frame(dt, time);
+        sync.syncPlanes(state, time);
+      };
+    }, args.timeScale),
+};
+
+// ---------------------------------------------------------------------------
 // Live game
 // ---------------------------------------------------------------------------
 
@@ -361,6 +464,8 @@ interface LiveArgs {
   autoStart: boolean;
   /** Game speed: 0.25 = slow motion for watching turns, banking and landings. */
   timeScale: number;
+  /** Draw the airspace edge, as `DEBUG_SHOW_AIRSPACE` does in the game. */
+  showAirspace: boolean;
 }
 
 /**
@@ -369,7 +474,7 @@ interface LiveArgs {
  */
 export const LiveGame: StoryObj<LiveArgs> = {
   argTypes: { timeScale: { control: { type: "range", min: 0.1, max: 2, step: 0.05 } } },
-  args: { autoStart: true, timeScale: 1 },
+  args: { autoStart: true, timeScale: 1, showAirspace: false },
   render: (args) =>
     mountStage((stage) => {
       const cam = gameCamera(stage);
@@ -393,12 +498,12 @@ export const LiveGame: StoryObj<LiveArgs> = {
         onRotate: (dir) => cam.controller.rotateBy(dir * ROTATE_STEP),
         onZoom: (dir) => cam.controller.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
       });
+      sync.setAirspaceVisible(args.showAirspace);
       const pointer = attachPointerInput(
         stage.canvas,
         stage.scene,
         cam.controller.camera,
         () => state,
-        { onEdgeHover: (active) => sync.setEdgeHighlight(active) },
       );
       if (args.autoStart) begin();
 

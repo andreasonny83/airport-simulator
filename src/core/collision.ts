@@ -1,12 +1,12 @@
 /**
  * Mid-air collision and proximity detection.
  *
- * Only the airspace (see `airspaceBounds` in core/layout.ts) is controlled
- * airspace. Paths may be drawn anywhere on the map, so the player can park
- * planes out past the dashed border or swing them wide round the field;
- * out there planes are deconflicted by the game itself and never collide or
- * warn, however close they get. Separation is the player's job only inside
- * the border.
+ * Only the airspace (see `airspaceBounds` in core/layout.ts), the area round
+ * the airports, is controlled airspace. Paths may be drawn anywhere on the
+ * map, so the player can park planes out past its edge or swing them wide
+ * round the field; out there planes are deconflicted by the game itself
+ * (see core/avoidance.ts) and never collide or warn, however close they
+ * get. Separation is the player's job only inside the edge.
  */
 import { COLLISION_DISTANCE, WARNING_DISTANCE } from "../config";
 import { isInAirspace } from "./layout";
@@ -29,13 +29,13 @@ export interface CollisionResult {
  *   (core/ground.ts).
  * - Departing planes are ignored: they are on their way off the world.
  * - Planes outside the airspace are ignored. That covers inbound planes
- *   still flying in from off-screen (they only stop being inbound once they
- *   cross the border, see core/plane.ts) and any plane the player has routed
- *   out past it.
+ *   still flying in (they only stop being inbound once they cross the
+ *   edge, see core/plane.ts) and any plane the player has routed out past
+ *   it.
  *
  * A pair only collides if *both* planes are in play, so a plane just
- * outside the border can't crash into one just inside it: crossing the
- * border is what makes a plane the player's responsibility.
+ * outside the edge can't crash into one just inside it: crossing the edge
+ * is what makes a plane the player's responsibility.
  */
 function isInPlay(plane: Plane, world: WorldSize): boolean {
   return plane.phase === "flying" && isInAirspace(plane.pos, world);

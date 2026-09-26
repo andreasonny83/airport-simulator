@@ -62,7 +62,7 @@ export class CameraController {
   private focusSite: { readonly x: number; readonly z: number } | null = null;
   /**
    * True from `focusOn` until the view is back inside the playfield after
-   * `release`. A crash site can sit in the airspace margin, past the pan
+   * `release`. A crash site can sit in the view frame's margin, past the pan
    * limit: skipping the hard clamp meanwhile lets the view glide back
    * instead of snapping to the limit on release.
    */
@@ -268,11 +268,10 @@ export class CameraController {
 
   /**
    * Size the orthographic frustum from `viewHalfHeight`, which frames the
-   * airspace at the default heading. The scale depends on the world only,
-   * never on alpha, so rotating never reads as a zoom. The sim sizes the
-   * airspace independently of the view, so the dashed edge always sits
-   * inside it at zoom 1. The world never changes on a window resize: only
-   * the frustum's shape follows the window, showing more ground round it.
+   * whole world (see `viewFrameBounds`) at the default heading. The scale
+   * depends on the world only, never on alpha, so rotating never reads as a
+   * zoom. The world never changes on a window resize: only the frustum's
+   * shape follows the window, showing more ground round it.
    */
   private fit(aspect: number): void {
     const safeAspect = safeViewAspect(aspect);

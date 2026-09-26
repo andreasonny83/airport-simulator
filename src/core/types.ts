@@ -92,12 +92,26 @@ export interface Plane {
   canDepart: boolean;
   /**
    * True from the spawn until the plane first crosses into the airspace.
-   * New planes start off-screen and fly straight in (see core/spawner.ts);
-   * meanwhile the HUD shows an arrow on the screen edge. Like every plane
-   * outside the airspace it can't collide (see core/collision.ts), but the
-   * player may already grab it and give it a path.
+   * New planes start off-screen and fly in towards `entry` (see
+   * core/spawner.ts); until they appear the HUD shows an arrow on the
+   * screen edge. Like every plane outside the airspace it can't collide
+   * (see core/collision.ts), but the player may already grab it and give
+   * it a path.
    */
   inbound: boolean;
+  /**
+   * Where an inbound plane's track crosses into the airspace. It steers
+   * back towards it after swerving round other traffic (see `avoidTurn`),
+   * so it still arrives where its arrow promised. Null for planes that
+   * weren't spawned inbound.
+   */
+  entry: Vec2 | null;
+  /**
+   * Heading offset (radians, positive = turn right) the automatic
+   * collision avoidance adds to this plane's course this step. Only planes
+   * outside the airspace get one (see core/avoidance.ts); 0 otherwise.
+   */
+  avoidTurn: number;
 }
 
 /**

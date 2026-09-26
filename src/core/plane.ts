@@ -16,7 +16,7 @@ import {
   WAYPOINT_CAPTURE_RADIUS,
 } from "../config";
 import { angleDelta, clamp, distance, normalizeAngle } from "./math";
-import { airspaceBounds, isInAirspace } from "./layout";
+import { airspaceBounds, airspaceCenter, distanceOutsideAirspace, isInAirspace } from "./layout";
 import { mapBounds } from "./scenery";
 import type { Plane, RunwayColor, Vec2, WorldSize } from "./types";
 
@@ -35,6 +35,8 @@ export function createPlane(id: number, color: RunwayColor, pos: Vec2, heading: 
     pathAnchored: false,
     canDepart: true,
     inbound: false,
+    entry: null,
+    avoidTurn: 0,
   };
 }
 
@@ -67,6 +69,9 @@ function moveForward(plane: Plane, dist: number): void {
  * can only change heading gradually (see `steer`), so it follows its path
  * like a real aircraft: smooth arcs, never an instant turn-around.
  *
+ * Outside the airspace the automatic collision avoidance may bend the
+ * course (see `Plane.avoidTurn`, set once per step by core/avoidance.ts).
+ *
  * Steering is a feedback loop, and feedback loops react differently to big
  * and small time steps. So the frame is split into fixed-size sub-steps,
  * which keeps flight paths the same whatever the display refresh rate.
@@ -86,37 +91,46 @@ function updateFlying(plane: Plane, dt: number, world: WorldSize): void {
       updateDeparting(plane, dt - i * h, world);
       return;
     }
-    steer(plane, desired ?? plane.heading, h);
+    steer(plane, (desired ?? plane.heading) + plane.avoidTurn, h);
     moveForward(plane, PLANE_SPEED * h);
     // Arrived: the plane is now in play like any other.
-    if (plane.inbound && isInAirspace(plane.pos, world)) plane.inbound = false;
+    if (plane.inbound && isInAirspace(plane.pos, world)) {
+      plane.inbound = false;
+      plane.entry = null;
+    }
   }
 }
 
 /**
  * True if flying straight on for `EXIT_LOOKAHEAD` units would take the plane
- * off the field. Lenient on purpose: the player only has to aim at the edge,
- * not drag all the way past it.
+ * out of the airspace, and further from it. Lenient on purpose: the player
+ * only has to aim at the edge, not drag all the way past it. The "further"
+ * part matters for paths that end out in the countryside: a plane left
+ * pointing back at the field there turns home rather than departing
+ * straight across it.
  */
 function isHeadingOut(plane: Plane, world: WorldSize): boolean {
   const ahead = {
     x: plane.pos.x + Math.cos(plane.heading) * EXIT_LOOKAHEAD,
     y: plane.pos.y + Math.sin(plane.heading) * EXIT_LOOKAHEAD,
   };
-  return !isInAirspace(ahead, world);
+  const out = distanceOutsideAirspace(ahead, world);
+  return out > 0 && out > distanceOutsideAirspace(plane.pos, world);
 }
 
 /**
  * Fly a departing plane straight out of the world. Any leftover bank rolls
- * out smoothly (steering towards its own heading). It stays fully visible
- * and is only removed once it has cleared the scenery map: the map is sized
- * to fill the view at the lowest zoom, so by then it is off-screen.
+ * out smoothly (steering towards its own heading), and the automatic
+ * collision avoidance may bend its track round other traffic. It stays
+ * fully visible and is only removed once it has cleared the scenery map:
+ * the map is sized to fill the view at the lowest zoom, so by then it is
+ * off-screen.
  */
 function updateDeparting(plane: Plane, dt: number, world: WorldSize): void {
   const steps = Math.max(1, Math.ceil(dt / FLIGHT_SUBSTEP));
   const h = dt / steps;
   for (let i = 0; i < steps; i++) {
-    steer(plane, plane.heading, h);
+    steer(plane, plane.heading + plane.avoidTurn, h);
     moveForward(plane, PLANE_SPEED * h);
   }
   const b = mapBounds(world);
@@ -131,23 +145,41 @@ function updateDeparting(plane: Plane, dt: number, world: WorldSize): void {
  * The heading the plane wants to fly right now, or null for "carry on
  * straight".
  *
+ * - Swerving round traffic outside the airspace: carry on, and let the
+ *   avoidance turn do the steering (see `Plane.avoidTurn`).
  * - With a path: aim at the next waypoint that is still worth chasing.
- * - Without one: if the plane has drifted off the field on its own, head
- *   back towards the middle with a smooth U-turn. (Planes the player steers
- *   out never get here: they switch to `departing`, see `updateFlying`.)
+ * - Without one: if the plane has drifted out of the airspace on its own,
+ *   head back towards its middle with a smooth U-turn. (Planes the player
+ *   steers out never get here: they switch to `departing`, see
+ *   `updateFlying`.)
  * - Inbound planes are still outside on purpose, on a track the spawner
- *   aimed across the airspace edge: they carry straight on.
+ *   aimed across the airspace edge: they hold course for their entry point
+ *   (which also brings them back onto it after swerving round traffic).
+ *   Once the entry point is behind them they carry straight on.
  */
 function desiredHeading(plane: Plane, world: WorldSize): number | null {
   const target = nextWaypoint(plane);
+  // Mid-swerve (see core/avoidance.ts), hold the current heading and let
+  // the avoidance turn bend it: aiming back at the path, entry point or
+  // field now would pull the plane straight back into the conflict. The
+  // course resumes once the conflict clears.
+  if (plane.avoidTurn !== 0) return null;
   if (target) return Math.atan2(target.y - plane.pos.y, target.x - plane.pos.x);
-  if (plane.inbound) return null;
+  if (plane.inbound) {
+    const e = plane.entry;
+    if (!e) return null;
+    const dx = e.x - plane.pos.x;
+    const dy = e.y - plane.pos.y;
+    const ahead = dx * Math.cos(plane.heading) + dy * Math.sin(plane.heading) > 0;
+    return ahead ? Math.atan2(dy, dx) : null;
+  }
 
   const b = airspaceBounds(world);
   const m = PLANE_RADIUS;
   const { x, y } = plane.pos;
   if (x < b.minX - m || x > b.maxX + m || y < b.minY - m || y > b.maxY + m) {
-    return Math.atan2(world.height / 2 - y, world.width / 2 - x);
+    const home = airspaceCenter(world);
+    return Math.atan2(home.y - y, home.x - x);
   }
   return null;
 }

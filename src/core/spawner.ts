@@ -35,16 +35,25 @@ export interface SpawnSpec {
 const OFFSCREEN_MARGIN = PLANE_RADIUS * 2;
 
 /**
+ * Entry points keep this fraction of each airspace side clear at both
+ * ends, so arrivals cross the edge along its middle rather than clipping a
+ * corner where they'd be back out again almost at once.
+ */
+const ENTRY_CORNER_INSET = 0.12;
+
+/**
  * Pick a random colour, airspace edge (see `edgeWeights`) and inward track
  * for a new plane. `viewAspect` is the window's width / height: the world
  * is fixed, but how much ground shows round it depends on the window.
  *
- * The track crosses the airspace edge at `entry`, somewhere along the
- * field's side, heading roughly inward. The plane starts back along that
- * track, off-screen at the default view: `ARRIVAL_WARNING` seconds of
- * flight beyond the point where it comes into sight. So it flies in from
- * the screen edge rather than appearing out of nowhere, and its arrow
- * shows for the same time whichever side it comes from.
+ * The track crosses the airspace edge at `entry`, somewhere along that
+ * side (clear of the corners), heading roughly inward. The plane starts
+ * back along that track, off-screen at the default view: `ARRIVAL_WARNING`
+ * seconds of flight beyond the point where it comes into sight. So it
+ * flies in from the screen edge rather than appearing out of nowhere, and
+ * its arrow shows for the same time whichever side it comes from. It then
+ * crosses the countryside round the airspace high up (see
+ * `cruiseAltitude`), descending as it nears the edge.
  */
 export function pickSpawn(
   world: WorldSize,
@@ -54,29 +63,29 @@ export function pickSpawn(
 ): SpawnSpec {
   const color = colors[Math.floor(rng() * colors.length)] ?? colors[0] ?? "red";
   const edge = pickEdge(edgeWeights(world, viewAspect), rng()); // 0 top, 1 right, 2 bottom, 3 left
-  const along = rng();
+  const along = ENTRY_CORNER_INSET + rng() * (1 - 2 * ENTRY_CORNER_INSET);
   const jitter = (rng() - 0.5) * 2 * SPAWN_HEADING_JITTER;
-  // Cross the airspace edge, but aimed at the runway field: `along` spans
-  // the field's side, not the (wider) airspace's.
   const b = airspaceBounds(world);
+  const x = b.minX + along * (b.maxX - b.minX);
+  const y = b.minY + along * (b.maxY - b.minY);
 
   let entry: Vec2;
   let heading: number;
   switch (edge) {
     case 0:
-      entry = { x: along * world.width, y: b.minY };
+      entry = { x, y: b.minY };
       heading = Math.PI / 2 + jitter;
       break;
     case 1:
-      entry = { x: b.maxX, y: along * world.height };
+      entry = { x: b.maxX, y };
       heading = Math.PI + jitter;
       break;
     case 2:
-      entry = { x: along * world.width, y: b.maxY };
+      entry = { x, y: b.maxY };
       heading = -Math.PI / 2 + jitter;
       break;
     default:
-      entry = { x: b.minX, y: along * world.height };
+      entry = { x: b.minX, y };
       heading = jitter;
   }
 
@@ -97,7 +106,8 @@ export function pickSpawn(
  * How likely each edge (top, right, bottom, left) is to get the next plane:
  * its length divided by how long a plane takes to fly in from it.
  *
- * - Length: arrivals spread evenly round the field, so long sides get more.
+ * - Length: arrivals spread evenly round the airspace, so long sides get
+ *   more.
  * - Time: the default view shows more ground beyond some edges than others
  *   (the tilt squashes depth, so above and below, most in tall windows).
  *   Planes from there spend longer flying in before the player can route
@@ -116,11 +126,13 @@ export function edgeWeights(
   // Straight-in time: the off-screen run-in, then across the visible gap
   // between the view edge and the airspace.
   const time = (gap: number) => (gap + OFFSCREEN_MARGIN) / PLANE_SPEED + ARRIVAL_WARNING;
+  const width = b.maxX - b.minX;
+  const height = b.maxY - b.minY;
   return [
-    world.width / time(b.minY - v.minY),
-    world.height / time(v.maxX - b.maxX),
-    world.width / time(v.maxY - b.maxY),
-    world.height / time(b.minX - v.minX),
+    width / time(b.minY - v.minY),
+    height / time(v.maxX - b.maxX),
+    width / time(v.maxY - b.maxY),
+    height / time(b.minX - v.minX),
   ];
 }
 
@@ -159,7 +171,7 @@ const SPAWN_ATTEMPTS = 5;
 /**
  * Add a new plane to `state`, only using colours whose runway exists and
  * has been unlocked at the current score (see `unlockedColors`). The plane
- * starts `inbound`: off-screen, flying straight in. Re-rolls a few times to
+ * starts `inbound`: off-screen, flying in towards `entry`. Re-rolls a few times to
  * keep new arrivals from bunching up with other planes.
  *
  * @returns the new plane, or null if there are no runways.
@@ -175,6 +187,7 @@ export function spawnPlane(state: GameState, rng: Rng): Plane | null {
 
   const plane = createPlane(state.nextPlaneId++, spec.color, spec.pos, spec.heading);
   plane.inbound = true;
+  plane.entry = { ...spec.entry };
   state.planes.push(plane);
   return plane;
 }

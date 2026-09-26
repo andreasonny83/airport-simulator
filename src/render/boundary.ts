@@ -1,9 +1,10 @@
 /**
- * Airspace boundary: a dashed outline around the airspace that fades in
- * while the player drags a path past the edge. Paths may run anywhere on the
- * map, but only planes inside the border can collide (see
- * core/collision.ts), so showing where it is tells the player where the
- * no-collision holding area begins.
+ * Airspace boundary: a dashed outline along the airspace edge (see
+ * `airspaceBounds` in core/layout.ts). A development aid only: players
+ * never see the edge, since what happens outside it takes care of itself.
+ * The game draws it when `DEBUG_SHOW_AIRSPACE` is on, to help decide where
+ * the edge should go (tune `AIRSPACE_MARGIN`); the airfield stories can
+ * toggle it too.
  */
 import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
@@ -19,19 +20,15 @@ import { OVERLAY_GROUP } from "./scene";
 const BOUNDARY_ALTITUDE = 0.2;
 /** Line width in world units (slightly thinner than a path line). */
 const BOUNDARY_WIDTH = 0.4;
-const BOUNDARY_COLOR = "#f8fafc";
-/** Peak opacity while highlighted. */
+/** Magenta: a debug colour nothing else in the scene uses. */
+const BOUNDARY_COLOR = "#f0abfc";
 const BOUNDARY_ALPHA = 0.9;
 /** One dash + gap every this many world units along the border. */
 const DASH_SPACING = 3;
-/** Fade time constants (seconds): appear quickly, linger a little. */
-const FADE_IN = 0.08;
-const FADE_OUT = 0.5;
 
 export class AirspaceBoundary {
   private line: Mesh | null = null;
-  private alpha = 0;
-  private active = false;
+  private visible = false;
 
   constructor(private readonly scene: Scene) {}
 
@@ -61,29 +58,16 @@ export class AirspaceBoundary {
       this.scene,
     );
     line.material!.transparencyMode = Material.MATERIAL_ALPHABLEND;
+    line.material!.alpha = BOUNDARY_ALPHA;
     line.isPickable = false;
     line.renderingGroupId = OVERLAY_GROUP; // over trees, like the paths
     this.line = line;
-    this.apply();
+    this.line.setEnabled(this.visible);
   }
 
-  /** Highlight the border (true while a drag is pressing past it). */
-  setActive(active: boolean): void {
-    this.active = active;
-  }
-
-  /** Ease the opacity towards its target; `dt` in seconds. */
-  update(dt: number): void {
-    const target = this.active ? BOUNDARY_ALPHA : 0;
-    const tau = this.active ? FADE_IN : FADE_OUT;
-    this.alpha += (target - this.alpha) * (1 - Math.exp(-dt / tau));
-    this.apply();
-  }
-
-  private apply(): void {
-    if (!this.line) return;
-    this.line.material!.alpha = this.alpha;
-    // Skip the draw call entirely once faded out.
-    this.line.setEnabled(this.alpha > 0.01);
+  /** Show or hide the outline. Hidden (and not drawn at all) by default. */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    this.line?.setEnabled(visible);
   }
 }

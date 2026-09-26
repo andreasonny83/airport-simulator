@@ -5,7 +5,9 @@
  *   1. spawn   – new planes appear at the edges, but only while fewer are
  *                flying than the progression cap allows (core/progression.ts)
  *   2. move    – every plane advances by dt: airborne ones along their
- *                paths, ones on the ground along their taxi routes
+ *                paths, ones on the ground along their taxi routes. First,
+ *                planes outside the airspace pick their avoidance turns
+ *                (core/avoidance.ts), so they keep clear of each other
  *   3. land    – planes over a matching threshold touch down and get a
  *                ground route; a landing may open a new runway colour
  *   4. collide – any remaining flying planes that overlap inside the
@@ -13,6 +15,7 @@
  *   5. prune   – planes stowed in a hangar, or flown off the world, are
  *                removed
  */
+import { resolveOuterTraffic } from "./avoidance";
 import { checkLanding } from "./landing";
 import { detectCollisions } from "./collision";
 import { isTouchdownZoneClear, touchDown, updateGround } from "./ground";
@@ -69,7 +72,8 @@ export function step(state: GameState, dt: number, rng: Rng = Math.random): SimE
     }
   }
 
-  // 2. Move.
+  // 2. Move. Avoidance first, from where everyone is at the start of the step.
+  resolveOuterTraffic(state.planes, state.world);
   for (const plane of state.planes) updatePlane(plane, dt, state.world);
   updateGround(state, dt);
 

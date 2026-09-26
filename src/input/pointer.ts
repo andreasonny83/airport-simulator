@@ -20,7 +20,6 @@ import type { Scene } from "@babylonjs/core/scene";
 import { PLANE_GRAB_RADIUS } from "../config";
 import { distance } from "../core/math";
 import { anchorPath, appendPathPoint, clampPathPoint, isSteerable, startPath } from "../core/path";
-import { isInAirspace } from "../core/layout";
 import type { GameState, Plane, Vec2 } from "../core/types";
 import { fromScene } from "../render/coords";
 
@@ -66,9 +65,8 @@ function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
 
 /**
  * Hooks out of pointer input. Paths may be drawn anywhere on the map, past
- * the airspace border included; the edge hook lets the scene show where the
- * border is while a path is drawn beyond it, since outside it planes can't
- * collide (see core/collision.ts).
+ * the airspace edge included: outside it the game keeps planes apart on its
+ * own (see core/avoidance.ts), so the edge needs no on-screen marker.
  */
 export interface PointerFeedback {
   /**
@@ -76,8 +74,6 @@ export interface PointerFeedback {
    * Without this hook, drags that miss a plane do nothing.
    */
   onPan?: (dx: number, dy: number) => void;
-  /** Whether any path drag currently has its pointer past the airspace edge. */
-  onEdgeHover?: (active: boolean) => void;
 }
 
 /** Handle on attached pointer input. */
@@ -104,8 +100,6 @@ export function attachPointerInput(
 ): PointerInput {
   /** pointerId → id of the plane that pointer is routing. */
   const active = new Map<number, number>();
-  /** Pointers currently past the airspace edge mid-drag. */
-  const outside = new Set<number>();
   /**
    * The one pointer dragging the map, and where it was last seen (canvas
    * pixels). Only one at a time: two fingers panning together would move
@@ -121,18 +115,9 @@ export function attachPointerInput(
   /** Reused result of `refreshHover`. */
   const highlighted = new Set<number>();
 
-  /** Record whether `pointerId` is past the edge; report changes. */
-  const setOutside = (pointerId: number, isOutside: boolean) => {
-    const before = outside.size > 0;
-    if (isOutside) outside.add(pointerId);
-    else outside.delete(pointerId);
-    if (before !== outside.size > 0) feedback.onEdgeHover?.(outside.size > 0);
-  };
-
-  /** Stop routing: forget the pointer and clear its edge state. */
+  /** Stop routing: forget the pointer. */
   const release = (pointerId: number) => {
     active.delete(pointerId);
-    setOutside(pointerId, false);
   };
 
   const toCanvas = (e: PointerEvent) => {
@@ -184,10 +169,6 @@ export function attachPointerInput(
     const { x, y } = toCanvas(e);
     const hit = screenToWorld(scene, camera, state, x, y);
     if (!hit) return;
-
-    // Show the airspace border while the path runs outside it: out there
-    // the plane is in the no-collision zone (see core/collision.ts).
-    setOutside(e.pointerId, !isInAirspace(hit, state.world));
 
     // Anywhere on the map is fair game; only the map's own edge clamps.
     const point = clampPathPoint(hit, state.world);

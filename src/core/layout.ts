@@ -20,12 +20,14 @@ import {
   RUNWAY_WIDTH,
   VIEW_ASPECT_MAX,
   VIEW_ASPECT_MIN,
+  VIEW_MARGIN,
   WORLD_ASPECT,
   WORLD_HEIGHT,
   YELLOW_RUNWAY_MIN_WIDTH,
   ZOOM_MIN,
 } from "../config";
 import { layoutAirfield } from "./airfield";
+import { rectCorners } from "./geometry";
 import { headingVector } from "./math";
 import type { Bounds } from "./scenery";
 import type { Runway, Vec2, WorldSize } from "./types";
@@ -44,25 +46,82 @@ export function safeViewAspect(aspect: number): number {
 }
 
 /**
- * The airspace: the runway field grown by `AIRSPACE_MARGIN` on every side.
- * Planes fly in across its edge (see core/spawner.ts), only planes inside it
- * can collide (see core/collision.ts), and a plane whose path ends past it,
- * heading out, leaves the world. Paths themselves may run anywhere on the map.
+ * The view frame: the whole world grown by `VIEW_MARGIN` on every side. The
+ * default camera view is fitted round it (see `viewHalfHeight`), so it is
+ * what the player sees at zoom 1: the airspace in the middle, and the ring
+ * of countryside round it where planes arrive and leave.
  *
  * The far/near margin is stretched by 1 / cos(tilt): the camera
  * foreshortens ground depth by cos(tilt), so on screen the gap round the
- * field looks the same on all four sides.
+ * world looks the same on all four sides.
  */
-export function airspaceBounds(world: WorldSize): Bounds {
-  const mx = AIRSPACE_MARGIN;
-  const my = AIRSPACE_MARGIN / Math.cos(CAMERA_TILT);
+export function viewFrameBounds(world: WorldSize): Bounds {
+  const mx = VIEW_MARGIN;
+  const my = VIEW_MARGIN / Math.cos(CAMERA_TILT);
   return { minX: -mx, minY: -my, maxX: world.width + mx, maxY: world.height + my };
 }
 
+/** Airspace per world size; `layoutRunways` is too heavy to redo per query. */
+const airspaceCache = new Map<string, Bounds>();
+
 /**
- * Half-height (scene units) of the orthographic view that frames the
- * airspace at zoom 1 and the default heading. The camera divides this by
- * its zoom (render/camera.ts).
+ * The airspace: the smallest rectangle round every airport's footprint
+ * (runways, taxiways, aprons and hangars; see `Airfield.footprint`), grown
+ * by `AIRSPACE_MARGIN` on every side (far/near stretched for the tilt, like
+ * `viewFrameBounds`). It is the game area proper:
+ *
+ * - inside it the player routes planes, and flying planes can collide
+ *   (see core/collision.ts);
+ * - outside it planes cruise higher (see `cruiseAltitude`) and steer clear
+ *   of each other on their own (see core/avoidance.ts), so the traffic
+ *   coming and going round the field never needs the player's attention;
+ * - new planes fly in across its edge (see core/spawner.ts), and a plane
+ *   whose path ends past it, heading out, leaves the world.
+ *
+ * Players never see the edge; `DEBUG_SHOW_AIRSPACE` draws it for tuning.
+ */
+export function airspaceBounds(world: WorldSize): Bounds {
+  const key = `${world.width}x${world.height}`;
+  const cached = airspaceCache.get(key);
+  if (cached) return cached;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const runway of layoutRunways(world)) {
+    for (const p of rectCorners(runway.airfield.footprint)) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+  }
+  const mx = AIRSPACE_MARGIN;
+  const my = AIRSPACE_MARGIN / Math.cos(CAMERA_TILT);
+  const bounds = { minX: minX - mx, minY: minY - my, maxX: maxX + mx, maxY: maxY + my };
+  airspaceCache.set(key, bounds);
+  return bounds;
+}
+
+/** Centre of the airspace: where planes that stray out of it head back to. */
+export function airspaceCenter(world: WorldSize): Vec2 {
+  const b = airspaceBounds(world);
+  return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+}
+
+/** Distance from `p` to the airspace rectangle (0 anywhere inside it). */
+export function distanceOutsideAirspace(p: Vec2, world: WorldSize): number {
+  const b = airspaceBounds(world);
+  const dx = Math.max(b.minX - p.x, 0, p.x - b.maxX);
+  const dy = Math.max(b.minY - p.y, 0, p.y - b.maxY);
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Half-height (scene units) of the orthographic view that fits the view
+ * frame (see `viewFrameBounds`) at zoom 1 and the default heading. The
+ * camera divides this by its zoom (render/camera.ts).
  *
  * - screen X: ground x maps one-to-one;
  * - screen Y: ground depth is foreshortened by cos(tilt). Altitude adds
@@ -71,12 +130,12 @@ export function airspaceBounds(world: WorldSize): Bounds {
  *
  * It only depends on the world, never on the current heading, so rotating
  * the view never changes the scale. (Turned away from the default heading,
- * the airspace's corners can leave the screen; zooming out brings them back.)
+ * the frame's corners can leave the screen; zooming out brings them back.)
  *
  * @param aspect  viewport width / height
  */
 export function viewHalfHeight(world: WorldSize, aspect: number): number {
-  const a = airspaceBounds(world);
+  const a = viewFrameBounds(world);
   const maxX = (a.maxX - a.minX) / 2;
   const maxY = ((a.maxY - a.minY) / 2) * Math.cos(CAMERA_TILT);
   return Math.max(maxY, maxX / safeViewAspect(aspect)) * CAMERA_FIT_PADDING;
@@ -85,7 +144,7 @@ export function viewHalfHeight(world: WorldSize, aspect: number): number {
 /**
  * The patch of ground the default view shows (zoom 1, not rotated or
  * panned) in a window of the given `aspect`, in sim coordinates. Wider than
- * the airspace on one axis unless the window's shape matches it exactly.
+ * the view frame on one axis unless the window's shape matches it exactly.
  * Arriving planes start outside it, so they fly into view instead of
  * popping up.
  */
@@ -104,7 +163,7 @@ export function defaultViewBounds(world: WorldSize, aspect: number): Bounds {
  * in `VIEW_ASPECT_MIN`..`VIEW_ASPECT_MAX`: what the static scenery map and
  * shadow frustum are sized for, so neither changes on a resize.
  *
- * The view contains the airspace, so as the window narrows its ground width
+ * The view contains the view frame, so as the window narrows its ground width
  * stays put while its depth grows, and as it widens the reverse: the
  * diagonal is largest at one end of the range, never in the middle.
  */
@@ -135,14 +194,16 @@ export function panFraction(zoom: number): number {
  * Continuous everywhere, so a plane never jumps as it crosses the edge.
  */
 export function cruiseAltitude(p: Vec2, world: WorldSize): number {
-  const b = airspaceBounds(world);
-  // Distance to the airspace rectangle (0 inside it).
-  const dx = Math.max(b.minX - p.x, 0, p.x - b.maxX);
-  const dy = Math.max(b.minY - p.y, 0, p.y - b.maxY);
-  const t = Math.min(1, Math.hypot(dx, dy) / ALTITUDE_TRANSITION);
+  const t = Math.min(1, distanceOutsideAirspace(p, world) / ALTITUDE_TRANSITION);
   // Smoothstep: level off at both ends rather than kinking into the climb.
   const s = t * t * (3 - 2 * t);
   return FLIGHT_ALTITUDE + (OUTER_FLIGHT_ALTITUDE - FLIGHT_ALTITUDE) * s;
+}
+
+/** True if `p` is inside the view frame (edge included, see `viewFrameBounds`). */
+export function isInViewFrame(p: Vec2, world: WorldSize): boolean {
+  const b = viewFrameBounds(world);
+  return p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
 }
 
 /** True if `p` is inside the airspace (edge included). */

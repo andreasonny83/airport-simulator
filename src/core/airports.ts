@@ -26,7 +26,7 @@ import {
   TOWER_SETBACK,
 } from "../config";
 import { convexHull, convexPolygonsNear, rectCorners, roundedHull } from "./geometry";
-import { isInAirspace } from "./layout";
+import { isInViewFrame } from "./layout";
 import { headingVector } from "./math";
 import type { OrientedRect, Runway, Vec2, WorldSize } from "./types";
 
@@ -101,7 +101,7 @@ export function layoutAirports(runways: readonly Runway[], world: WorldSize): Ai
       const option = placeLandside(draft.center, dir, draft.points, world);
       const shapes = [rectCorners(option.terminal), rectCorners(option.carPark)];
       const fits =
-        shapes.every((s) => s.every((p) => isInAirspace(p, world))) &&
+        shapes.every((s) => s.every((p) => isInViewFrame(p, world))) &&
         shapes.every((s) =>
           [...others, ...placed].every((o) => !convexPolygonsNear(s, o, LANDSIDE_CLEARANCE)),
         );

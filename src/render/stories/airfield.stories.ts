@@ -6,7 +6,9 @@
  * Tuning loop: runway markings/lights live in runway.ts, taxiways and
  * hangars in airfield.ts, the layout and sizes in config.ts (RUNWAY_*,
  * CROSSING_*, TAXIWAY_*, STAND_*, HANGAR_*, STREAM_*, TREE_*, AIRSPACE_MARGIN,
- * MAP_MARGIN, ZOOM_MIN), colours in landscape.ts. Save and the story rebuilds. Boats have their own stories
+ * VIEW_MARGIN, MAP_MARGIN, ZOOM_MIN), colours in landscape.ts. Save and the
+ * story rebuilds. The magenta dashed outline (`showBoundary`) is the
+ * airspace edge, for tuning AIRSPACE_MARGIN. Boats have their own stories
  * in "Scene/River".
  */
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -40,7 +42,10 @@ interface AirfieldArgs {
   rotationDeg: number;
   /** Camera zoom, as the "+" / "−" buttons set it (ZOOM_MIN–2.5). */
   zoom: number;
-  /** Show the airspace edge (normally only visible while a path is dragged past it). */
+  /**
+   * Show the airspace edge. Players never see it; the game only draws it
+   * with `DEBUG_SHOW_AIRSPACE` on, for tuning `AIRSPACE_MARGIN`.
+   */
   showBoundary: boolean;
 }
 
@@ -203,10 +208,9 @@ export const RunwayLayout: StoryObj<AirfieldArgs> = {
       for (const r of runways) airfields.create(r, cam.world);
       const boundary = new AirspaceBoundary(stage.scene);
       boundary.setWorld(cam.world);
-      boundary.setActive(args.showBoundary);
+      boundary.setVisible(args.showBoundary);
       return (dt, time) => {
         cam.frame(dt, time);
-        boundary.update(dt);
         for (const view of views) view.update(time);
       };
     }),
@@ -235,11 +239,10 @@ export const FullLandscape: StoryObj<AirfieldArgs> = {
       for (const r of runways) airfields.create(r, cam.world);
       const boundary = new AirspaceBoundary(stage.scene);
       boundary.setWorld(cam.world);
-      boundary.setActive(args.showBoundary);
+      boundary.setVisible(args.showBoundary);
       return (dt, time) => {
         cam.frame(dt, time);
         landscape.update(time);
-        boundary.update(dt);
         for (const view of views) view.update(time);
       };
     }),

@@ -63,9 +63,6 @@ const hud = createHud(document.body, {
 const pointer = attachPointerInput(canvas, scene, cameraController.camera, () => state, {
   // Dragging empty ground grabs the map.
   onPan: (dx, dy) => cameraController.dragBy(dx, dy),
-  // Paths may run past the airspace edge: show the border (outside it
-  // planes can't collide) while a drag is beyond it.
-  onEdgeHover: (active) => sceneSync.setEdgeHighlight(active),
 });
 
 // Arrow keys pan the map (held keys are polled in the render loop).

@@ -16,6 +16,7 @@ import {
   ALTITUDE_SCALE_PER_UNIT,
   APPROACH_DISTANCE,
   COLOR_HEX,
+  DEBUG_SHOW_AIRSPACE,
   FLARE_DISTANCE,
   FLIGHT_ALTITUDE,
   LANDING_SPEED_START,
@@ -163,12 +164,17 @@ export class SceneSync {
     this.landscape = new Landscape(scene, shadows);
     this.runwayFactory = new RunwayFactory(scene, (color) => factory.material(color));
     this.airfieldFactory = new AirfieldFactory(scene, (color) => factory.material(color), shadows);
+    // Players never see the airspace edge; it's drawn for tuning only.
     this.boundary = new AirspaceBoundary(scene);
+    this.boundary.setVisible(DEBUG_SHOW_AIRSPACE);
   }
 
-  /** Show the airspace border while a path drag is past it (the no-collision zone). */
-  setEdgeHighlight(active: boolean): void {
-    this.boundary.setActive(active);
+  /**
+   * Show or hide the airspace edge (a development aid; see
+   * `DEBUG_SHOW_AIRSPACE`, which sets the starting state).
+   */
+  setAirspaceVisible(visible: boolean): void {
+    this.boundary.setVisible(visible);
   }
 
   /**
@@ -202,7 +208,6 @@ export class SceneSync {
     // `time` stands still while paused, so the easing freezes along with it.
     const dt = this.lastTime === null ? 0 : Math.max(0, time - this.lastTime);
     this.lastTime = time;
-    this.boundary.update(dt);
     const alive = new Set<number>();
     for (const plane of state.planes) {
       alive.add(plane.id);

@@ -39,23 +39,33 @@ export const VIEW_ASPECT_MAX = 21 / 9;
  */
 export const CAMERA_TILT = 0.9;
 
-/** Extra margin around the airspace when fitting the default view. */
+/** Extra margin around the view frame when fitting the default view. */
 export const CAMERA_FIT_PADDING = 1.04;
 
 /**
- * The airspace (where planes are in play and can collide) is the runway field
- * grown by this much on every side. Measured as seen on screen: the far and
- * near sides get `AIRSPACE_MARGIN / cos(CAMERA_TILT)` of ground, which the
- * tilt foreshortens back to the same on-screen gap as the left and right.
- * The default camera view frames the airspace (see `viewHalfHeight`).
+ * The default camera view frames the whole world grown by this much on
+ * every side (see `viewFrameBounds` in core/layout.ts). Measured as seen on
+ * screen: the far and near sides get `VIEW_MARGIN / cos(CAMERA_TILT)` of
+ * ground, which the tilt foreshortens back to the same on-screen gap as the
+ * left and right.
  */
-export const AIRSPACE_MARGIN = 10;
+export const VIEW_MARGIN = 10;
+
+/**
+ * The airspace (where the player routes planes and planes can collide) is
+ * the airports' area, runways, taxiways and hangars, grown by this much on
+ * every side (see `airspaceBounds` in core/layout.ts). Measured on screen
+ * like `VIEW_MARGIN`. Outside it planes cruise higher and keep clear of
+ * each other on their own (see core/avoidance.ts). Flip
+ * `DEBUG_SHOW_AIRSPACE` on to see the edge while tuning this.
+ */
+export const AIRSPACE_MARGIN = 24;
 
 /** Lowest zoom (fully zoomed out). The scenery map is sized to cover it. */
 export const ZOOM_MIN = 0.6;
 
 /** Highest zoom (fully zoomed in). */
-export const ZOOM_MAX = 5;
+export const ZOOM_MAX = 6;
 
 /**
  * Minimum world width required before the third (yellow) runway is added.
@@ -79,6 +89,18 @@ export const COLLISION_DISTANCE = PLANE_RADIUS * 2.2;
 
 /** Two flying planes closer than this show a proximity warning. */
 export const WARNING_DISTANCE = COLLISION_DISTANCE * 2.5;
+
+/**
+ * Automatic collision avoidance outside the airspace (see
+ * core/avoidance.ts). A plane out there that is predicted to pass within
+ * `AVOID_SEPARATION` of other traffic in the next `AVOID_LOOKAHEAD`
+ * seconds turns away by up to `AVOID_MAX_TURN` radians off its course,
+ * harder the closer and sooner the conflict. The separation is a little
+ * over the collision distance so models never visibly overlap.
+ */
+export const AVOID_SEPARATION = COLLISION_DISTANCE * 1.8;
+export const AVOID_LOOKAHEAD = 4;
+export const AVOID_MAX_TURN = 0.9;
 
 /** Pointer must go down within this distance of a plane to grab it. */
 export const PLANE_GRAB_RADIUS = PLANE_RADIUS * 3;
@@ -663,3 +685,14 @@ export const COLOR_HEX: Record<RunwayColor, string> = {
   blue: "#3b82f6",
   yellow: "#eab308",
 };
+
+// ---------------------------------------------------------------------------
+// Development aids (leave off in a shipped build)
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw the airspace edge (see `airspaceBounds` in core/layout.ts) as a
+ * dashed outline in the game. Players never see it; turn it on only while
+ * tuning `AIRSPACE_MARGIN` to decide where the controlled area should end.
+ */
+export const DEBUG_SHOW_AIRSPACE = false;
