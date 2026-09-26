@@ -5,7 +5,9 @@
  *   - Markers:  a frozen moment staged by hand: drawn path lines, a pair of
  *               planes close enough for warning rings, a path anchored
  *               onto a runway threshold (green ring, re-anchored on a loop
- *               so its hold-and-fade replays), and two planes still
+ *               so its hold-and-fade replays), the free-path plane
+ *               hovered by the pointer on a loop (white ring, slight
+ *               swell; the `hover` arg holds it on), and two planes still
  *               off-screen on their way in, with their arrival arrows. The
  *               sim doesn't run, but the render clock does, so rings pulse
  *               and wind blows.
@@ -21,7 +23,7 @@
  *               the way down and is smallest on the ground.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
  *
- * Tuning loop: PATH_* / ANCHOR_RING_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
+ * Tuning loop: PATH_* / ANCHOR_RING_* / HOVER_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
  * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
  * ui/hudMarkup.ts, distances (AIRSPACE_MARGIN, ARRIVAL_WARNING…) in config.ts.
  * Crash: CRASH_ZOOM / CRASH_FRAME_LIFT / CRASH_ORBIT_* / CRASH_OVERLAY_DELAY in config.ts,
@@ -143,12 +145,19 @@ function stageMarkers(state: GameState): void {
   state.planes = planes;
 }
 
-export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
+interface MarkersArgs {
+  rotationDeg: number;
+  zoom: number;
+  /** Keep the hover highlight on, instead of toggling it on a loop. */
+  hover: boolean;
+}
+
+export const Markers: StoryObj<MarkersArgs> = {
   argTypes: {
     rotationDeg: { control: { type: "range", min: -180, max: 180, step: 15 } },
     zoom: { control: { type: "range", min: ZOOM_MIN, max: 2.5, step: 0.05 } },
   },
-  args: { rotationDeg: 0, zoom: 1 },
+  args: { rotationDeg: 0, zoom: 1, hover: false },
   render: (args) =>
     mountStage((stage) => {
       const cam = gameCamera(stage, args.rotationDeg * DEG, args.zoom);
@@ -163,12 +172,17 @@ export const Markers: StoryObj<{ rotationDeg: number; zoom: number }> = {
       const approach = state.planes.find((p) => p.pathAnchored);
       const replayEvery = ANCHOR_RING_HOLD + ANCHOR_RING_FADE + 1.5;
       let sinceAnchor = 0;
+      // The free-path plane (id 2) is "hovered": 1.5 s on, 1.5 s off, so the
+      // ring's ease in and out shows too (see HOVER_EASE in sceneSync.ts).
+      const hovered = new Set([2]);
+      const none = new Set<number>();
       return (dt, time) => {
         if (approach) {
           sinceAnchor += dt;
           approach.pathAnchored = sinceAnchor < replayEvery;
           if (!approach.pathAnchored) sinceAnchor = 0;
         }
+        sync.setHighlighted(args.hover || time % 3 < 1.5 ? hovered : none);
         cam.frame(dt, time);
         sync.syncPlanes(state, time);
         arrows.update(arrivalMarkers(state, stage.scene, stage.canvas));
@@ -379,9 +393,13 @@ export const LiveGame: StoryObj<LiveArgs> = {
         onRotate: (dir) => cam.controller.rotateBy(dir * ROTATE_STEP),
         onZoom: (dir) => cam.controller.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
       });
-      attachPointerInput(stage.canvas, stage.scene, cam.controller.camera, () => state, {
-        onEdgeHover: (active) => sync.setEdgeHighlight(active),
-      });
+      const pointer = attachPointerInput(
+        stage.canvas,
+        stage.scene,
+        cam.controller.camera,
+        () => state,
+        { onEdgeHover: (active) => sync.setEdgeHighlight(active) },
+      );
       if (args.autoStart) begin();
 
       let time = 0;
@@ -408,6 +426,7 @@ export const LiveGame: StoryObj<LiveArgs> = {
           hud.showGameOver(state.score);
         }
         cam.frame(dt, time);
+        sync.setHighlighted(pointer.refreshHover());
         sync.syncPlanes(state, time);
         hud.setArrivals(arrivalMarkers(state, stage.scene, stage.canvas));
       };

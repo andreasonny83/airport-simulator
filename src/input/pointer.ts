@@ -8,6 +8,10 @@
  * planes at once. Grabbing a plane always wins over panning: a press only
  * pans when no plane is in grab range (or when paths can't be drawn, e.g.
  * while paused), so routing is never stolen by the camera.
+ *
+ * Hover: a mouse or pen resting over a grabbable plane turns the cursor into
+ * a pointer and reports the plane (see `refreshHover`), so the scene can
+ * light it up as "you can drag this".
  */
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import "@babylonjs/core/Culling/ray"; // side effect: adds scene.createPickingRay
@@ -76,17 +80,28 @@ export interface PointerFeedback {
   onEdgeHover?: (active: boolean) => void;
 }
 
-/**
- * Wire pointer events on `canvas` to path drawing and map panning.
- * @returns a function that removes all listeners.
- */
+/** Handle on attached pointer input. */
+export interface PointerInput {
+  /**
+   * Planes to highlight as interactive this frame: the steerable plane under
+   * an idle mouse/pen (if any) plus every plane a pointer is routing right
+   * now. Also sets the canvas cursor to match. Call once per frame: planes
+   * fly under a cursor that isn't moving, so pointer events alone would go
+   * stale. The returned set is reused between calls.
+   */
+  refreshHover(): ReadonlySet<number>;
+  /** Remove all listeners. */
+  dispose(): void;
+}
+
+/** Wire pointer events on `canvas` to path drawing and map panning. */
 export function attachPointerInput(
   canvas: HTMLCanvasElement,
   scene: Scene,
   camera: Camera,
   getState: () => GameState,
   feedback: PointerFeedback = {},
-): () => void {
+): PointerInput {
   /** pointerId → id of the plane that pointer is routing. */
   const active = new Map<number, number>();
   /** Pointers currently past the airspace edge mid-drag. */
@@ -97,6 +112,14 @@ export function attachPointerInput(
    * the map twice as fast as either finger.
    */
   let pan: { pointerId: number; x: number; y: number } | null = null;
+  /**
+   * Where a mouse or pen was last seen over the canvas (canvas pixels), or
+   * null once it leaves. Touch never hovers, so it's never recorded: a
+   * finger lifted off the screen mustn't leave a plane lit up.
+   */
+  let hoverAt: { x: number; y: number } | null = null;
+  /** Reused result of `refreshHover`. */
+  const highlighted = new Set<number>();
 
   /** Record whether `pointerId` is past the edge; report changes. */
   const setOutside = (pointerId: number, isOutside: boolean) => {
@@ -140,6 +163,7 @@ export function attachPointerInput(
   };
 
   const onMove = (e: PointerEvent) => {
+    if (e.pointerType !== "touch") hoverAt = toCanvas(e);
     if (pan && pan.pointerId === e.pointerId) {
       const { x, y } = toCanvas(e);
       const h = canvas.clientHeight || 1;
@@ -181,15 +205,49 @@ export function attachPointerInput(
     release(e.pointerId);
   };
 
+  const onLeave = () => {
+    hoverAt = null;
+  };
+
+  const refreshHover = (): ReadonlySet<number> => {
+    highlighted.clear();
+    // A plane being routed stays lit for as long as it's held.
+    for (const planeId of active.values()) highlighted.add(planeId);
+    // Hover only while nothing is held: mid-drag the cursor is out drawing
+    // a path, and planes it passes over aren't about to be grabbed.
+    const state = getState();
+    let overPlane = false;
+    if (hoverAt && !pan && active.size === 0 && state.phase === "playing") {
+      const hit = screenToWorld(scene, camera, state, hoverAt.x, hoverAt.y);
+      const plane = hit && findPlaneNear(state.planes, hit);
+      if (plane) {
+        highlighted.add(plane.id);
+        overPlane = true;
+      }
+    }
+    // Panning owns the cursor ("grabbing") until it ends. Only write on
+    // change: this runs every frame.
+    if (!pan) {
+      const cursor = overPlane || active.size > 0 ? "pointer" : "";
+      if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    }
+    return highlighted;
+  };
+
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
+  canvas.addEventListener("pointerleave", onLeave);
 
-  return () => {
-    canvas.removeEventListener("pointerdown", onDown);
-    canvas.removeEventListener("pointermove", onMove);
-    canvas.removeEventListener("pointerup", onUp);
-    canvas.removeEventListener("pointercancel", onUp);
+  return {
+    refreshHover,
+    dispose: () => {
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("pointerleave", onLeave);
+    },
   };
 }

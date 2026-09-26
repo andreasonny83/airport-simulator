@@ -1,5 +1,5 @@
 /**
- * Mesh + material factory: aircraft, warning rings (runways live in
+ * Mesh + material factory: aircraft, warning/hover/anchor rings (runways live in
  * runway.ts) and the glow layer for aircraft lights.
  *
  * Aircraft are built once per (model, colour) as a hidden template (see
@@ -33,6 +33,7 @@ export class MeshFactory {
   private readonly glow: GlowLayer;
   private readonly warning: StandardMaterial;
   private readonly anchor: StandardMaterial;
+  private readonly hover: StandardMaterial;
 
   constructor(private readonly scene: Scene) {
     // Warning ring: unlit, translucent red that the sync layer pulses.
@@ -45,6 +46,12 @@ export class MeshFactory {
     this.anchor = new StandardMaterial("anchor", scene);
     this.anchor.disableLighting = true;
     this.anchor.emissiveColor = Color3.FromHexString("#22c55e");
+
+    // Hover ring: unlit white "grab me" halo. Neutral on purpose: it must
+    // not read as a team colour (red plane) or as the red warning ring.
+    this.hover = new StandardMaterial("hover", scene);
+    this.hover.disableLighting = true;
+    this.hover.emissiveColor = Color3.White();
 
     this.aircraftMaterials = this.makeAircraftMaterials();
     // Exclude by default: with an empty include list (no planes yet) the
@@ -112,6 +119,24 @@ export class MeshFactory {
     ring.material = this.warning;
     ring.isPickable = false;
     ring.renderingGroupId = OVERLAY_GROUP;
+    return ring;
+  }
+
+  /**
+   * Flat white ring shown around a plane the pointer hovers or holds, so it
+   * reads as draggable. Sized inside the warning ring, so both show when a
+   * plane is hovered and in conflict. Faded in and out by the sync layer.
+   */
+  createHoverRing(name: string): Mesh {
+    const ring = CreateTorus(
+      name,
+      { diameter: PLANE_RADIUS * 2.8, thickness: 0.3, tessellation: 40 },
+      this.scene,
+    );
+    ring.material = this.hover;
+    ring.isPickable = false;
+    ring.renderingGroupId = OVERLAY_GROUP;
+    ring.setEnabled(false);
     return ring;
   }
 

@@ -60,6 +60,18 @@ const ANCHOR_RING_ALTITUDE = 0.2;
  */
 export const ANCHOR_RING_HOLD = 2;
 export const ANCHOR_RING_FADE = 0.8;
+/**
+ * Hover highlight (a plane under the mouse, or held by a pointer; see
+ * input/pointer.ts `refreshHover`). It eases in and out over roughly
+ * `HOVER_EASE` seconds: a white ring that grows into place under the plane
+ * while the plane itself swells by up to `HOVER_SCALE` (0.1 = 10 %), as if
+ * lifted towards the player's finger.
+ */
+export const HOVER_EASE = 0.08;
+export const HOVER_SCALE = 0.1;
+/** Hover ring opacity at full highlight, and how deep its slow pulse dips. */
+const HOVER_RING_ALPHA = 0.85;
+const HOVER_RING_PULSE = 0.2;
 /** Height of a plane on the ground (sitting on its wheels on the runway). */
 const RUNWAY_ALTITUDE = 0.35;
 /**
@@ -99,6 +111,10 @@ interface PlaneView {
   aircraft: AircraftRig;
   color: RunwayColor;
   ring: Mesh;
+  /** White ring around the plane while it's hovered or held. */
+  hoverRing: Mesh;
+  /** Eased hover highlight, 0 (none) to 1 (full). */
+  hover: number;
   /** Green ring on the threshold, briefly, once this plane's path anchors. */
   anchorRing: Mesh;
   /** Seconds since the path anchored (ring's age), or null while unanchored. */
@@ -136,6 +152,8 @@ export class SceneSync {
    */
   private crashEffect: CrashEffect | null = null;
   private readonly wreckIds = new Set<number>();
+  /** Ids of planes to highlight as interactive (see `setHighlighted`). */
+  private highlighted: ReadonlySet<number> = new Set();
 
   constructor(
     private readonly scene: Scene,
@@ -151,6 +169,14 @@ export class SceneSync {
   /** Show the airspace border while a path drag is past it (the no-collision zone). */
   setEdgeHighlight(active: boolean): void {
     this.boundary.setActive(active);
+  }
+
+  /**
+   * Planes to highlight as interactive: hovered or held by a pointer (see
+   * input/pointer.ts `refreshHover`). Applied on the next `syncPlanes`.
+   */
+  setHighlighted(ids: ReadonlySet<number>): void {
+    this.highlighted = ids;
   }
 
   /** Build static geometry (landscape, runways, taxiways, hangars) for the world. */
@@ -194,6 +220,8 @@ export class SceneSync {
           aircraft,
           color: plane.color,
           ring: this.factory.createWarningRing(`ring-${plane.id}`),
+          hoverRing: this.factory.createHoverRing(`hover-${plane.id}`),
+          hover: 0,
           anchorRing: this.factory.createAnchorRing(`anchor-${plane.id}`),
           anchorAge: null,
           path: null,
@@ -219,6 +247,7 @@ export class SceneSync {
       for (const mesh of view.aircraft.shadowCasters) this.shadows.removeShadowCaster(mesh, false);
       this.factory.disposeAircraft(view.aircraft);
       view.ring.dispose();
+      view.hoverRing.dispose();
       view.anchorRing.dispose();
       view.path?.dispose(false, true);
       this.views.delete(id);
@@ -252,6 +281,7 @@ export class SceneSync {
       if (!view) continue;
       this.wreckIds.add(id);
       view.ring.setEnabled(false);
+      view.hoverRing.setEnabled(false);
       view.anchorRing.setEnabled(false);
       view.path?.dispose(false, true);
       view.path = null;
@@ -307,7 +337,13 @@ export class SceneSync {
     // little bigger, planes on the ground a little smaller. Driven by the
     // eased altitude, so the size changes as smoothly as the height. The
     // warning ring keeps its size: it marks the real collision distance.
-    root.scaling.setAll(1 + (altitude - FLIGHT_ALTITUDE) * ALTITUDE_SCALE_PER_UNIT);
+    // Hover: ease the highlight towards on/off. `dt` is 0 while paused, and
+    // nothing can be grabbed then, so snap instead of freezing half-lit.
+    const hoverTarget = this.highlighted.has(plane.id) && plane.phase === "flying" ? 1 : 0;
+    view.hover =
+      dt > 0 ? view.hover + (hoverTarget - view.hover) * ease(dt, HOVER_EASE) : hoverTarget;
+    const perspective = 1 + (altitude - FLIGHT_ALTITUDE) * ALTITUDE_SCALE_PER_UNIT;
+    root.scaling.setAll(perspective * (1 + view.hover * HOVER_SCALE));
     root.position.x += wind.drift.x;
     root.position.z -= wind.drift.y; // sim +y is scene -z (see coords.ts)
     root.position.y += wind.lift;
@@ -350,6 +386,19 @@ export class SceneSync {
       view.ring.position.x += wind.drift.x;
       view.ring.position.z -= wind.drift.y;
       view.ring.visibility = 0.55 + 0.45 * Math.sin(time * 12);
+    }
+
+    // Hover ring: centred on the plane like the warning ring, growing from
+    // 80 % to full size as it fades in, with a slow breath while held.
+    const showHover = view.hover > 0.01;
+    view.hoverRing.setEnabled(showHover);
+    if (showHover) {
+      this.placeOverTrack(plane, world, altitude, view.hoverRing.position);
+      view.hoverRing.position.x += wind.drift.x;
+      view.hoverRing.position.z -= wind.drift.y;
+      view.hoverRing.scaling.setAll(0.8 + 0.2 * view.hover);
+      const pulse = 1 - HOVER_RING_PULSE * (0.5 + 0.5 * Math.sin(time * 5));
+      view.hoverRing.visibility = view.hover * HOVER_RING_ALPHA * pulse;
     }
 
     // Anchor ring: sits on the threshold (the anchored path's last point)

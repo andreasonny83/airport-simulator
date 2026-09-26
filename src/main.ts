@@ -60,7 +60,7 @@ const hud = createHud(document.body, {
   onZoom: (dir) => cameraController.zoomBy(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
 });
 
-attachPointerInput(canvas, scene, cameraController.camera, () => state, {
+const pointer = attachPointerInput(canvas, scene, cameraController.camera, () => state, {
   // Dragging empty ground grabs the map.
   onPan: (dx, dy) => cameraController.dragBy(dx, dy),
   // Paths may run past the airspace edge: show the border (outside it
@@ -132,6 +132,9 @@ engine.runRenderLoop(() => {
 
   cameraController.panBy(panKeys.direction(), dt);
   cameraController.update(dt, aspect());
+  // Light up the plane under the mouse (or held): planes move under a still
+  // cursor, so hover is re-checked every frame, not only on pointer moves.
+  sceneSync.setHighlighted(pointer.refreshHover());
   sceneSync.syncPlanes(state, time);
   scene.render();
   // After render, so the arrows use this frame's camera matrices.
