@@ -3,8 +3,6 @@
  */
 import {
   ARRIVAL_WARNING,
-  CAMERA_TILT,
-  FLIGHT_ALTITUDE,
   PLANE_RADIUS,
   PLANE_SPEED,
   SPAWN_HEADING_JITTER,
@@ -30,10 +28,11 @@ export interface SpawnSpec {
 
 /**
  * How far past the default view's edge a plane must start to be fully out
- * of sight: its own size, plus its altitude, which lifts it up the screen
- * (a plane just past the near edge would otherwise peek in).
+ * of sight: its own size. Altitude doesn't lift it up the screen, since
+ * planes are drawn over their ground track (render/sceneSync.ts
+ * `placeOverTrack`).
  */
-const OFFSCREEN_MARGIN = PLANE_RADIUS * 2 + FLIGHT_ALTITUDE * Math.tan(CAMERA_TILT);
+const OFFSCREEN_MARGIN = PLANE_RADIUS * 2;
 
 /**
  * Pick a random colour, airspace edge (see `edgeWeights`) and inward track

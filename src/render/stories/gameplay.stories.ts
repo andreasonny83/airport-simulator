@@ -13,6 +13,12 @@
  *               loop: the crash cinematic (camera glide, zoom and slow
  *               orbit) with the fireball, falling wrecks, debris, fire and
  *               smoke, and the see-through game-over panel on its delay.
+ *   - Landing:  one plane flown by the real sim down an anchored path from
+ *               well outside the airspace, on a loop: it descends from
+ *               OUTER_FLIGHT_ALTITUDE as it crosses the edge, glides down
+ *               the approach, flares, taxis to a stand. Its model scales
+ *               with height (ALTITUDE_SCALE_PER_UNIT), so it shrinks on
+ *               the way down and is smallest on the ground.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion.
  *
  * Tuning loop: PATH_* / ANCHOR_RING_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
@@ -22,18 +28,24 @@
  * WRECK_* / DEBRIS_* / FLASH_* / SCORCH_* / SMOKE_DRIFT and the particle
  * set-ups in crash.ts, FOCUS_EASE_RATE in camera.ts, CRASH_BACKDROP in
  * ui/hud.ts.
+ * Landing: FLIGHT_ALTITUDE / OUTER_FLIGHT_ALTITUDE / ALTITUDE_TRANSITION /
+ * APPROACH_DISTANCE / THRESHOLD_ALTITUDE / ALTITUDE_SCALE_PER_UNIT and
+ * FLARE_DISTANCE in config.ts, MAX_VERTICAL_SPEED in sceneSync.ts.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import {
   COLOR_HEX,
   CRASH_OVERLAY_DELAY,
+  PATH_MIN_SPACING,
   PLANE_SPEED,
   ROTATE_STEP,
   WARNING_DISTANCE,
   ZOOM_MIN,
   ZOOM_STEP,
 } from "../../config";
+import { airspaceBounds, isInAirspace } from "../../core/layout";
 import { headingVector, mulberry32 } from "../../core/math";
+import { anchorPath, appendPathPoint } from "../../core/path";
 import { createPlane } from "../../core/plane";
 import { startGame, step, togglePause } from "../../core/simulation";
 import { pickSpawn } from "../../core/spawner";
@@ -245,6 +257,80 @@ export const Crash: StoryObj<CrashArgs> = {
             cam.controller.release();
             stageCrash(state, args.angleDeg);
           }
+        }
+        cam.frame(dt, time);
+        sync.syncPlanes(state, time);
+      };
+    }, args.timeScale),
+};
+
+// ---------------------------------------------------------------------------
+// Landing (real sim, one plane)
+// ---------------------------------------------------------------------------
+
+interface LandingArgs {
+  /** How far outside the airspace the plane starts (world units). */
+  startOutside: number;
+  /** Seconds before the approach replays (the plane may still be taxiing). */
+  replayAfter: number;
+  timeScale: number;
+}
+
+/**
+ * One red plane on the red runway's extended centreline, `startOutside`
+ * units beyond the airspace edge, with a straight path drawn to the
+ * threshold and anchored exactly as the pointer input would. Nothing else
+ * flies (spawning held off).
+ */
+function stageLanding(state: GameState, startOutside: number): void {
+  const runway = state.runways.find((r) => r.color === "red") ?? state.runways[0]!;
+  const dir = headingVector(runway.heading);
+  // Walk back along the approach until clear of the airspace, then further.
+  const bounds = airspaceBounds(state.world);
+  const reach = Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+  let back = 0;
+  const at = (d: number): Vec2 => ({
+    x: runway.threshold.x - dir.x * d,
+    y: runway.threshold.y - dir.y * d,
+  });
+  while (back < reach && isInAirspace(at(back), state.world)) back += 1;
+  back += startOutside;
+
+  const plane = createPlane(state.nextPlaneId++, runway.color, at(back), runway.heading);
+  state.planes = [plane];
+  // Draw the path point by point, trying to anchor after each (as input does).
+  for (let d = back - PATH_MIN_SPACING; d > -PATH_MIN_SPACING; d -= PATH_MIN_SPACING) {
+    appendPathPoint(plane, at(Math.max(0, d)));
+    if (anchorPath(plane, state.runways, state.world)) break;
+  }
+  state.phase = "playing";
+  state.spawnTimer = -1e9; // no other traffic
+}
+
+export const Landing: StoryObj<LandingArgs> = {
+  argTypes: {
+    startOutside: { control: { type: "range", min: 0, max: 40, step: 1 } },
+    replayAfter: { control: { type: "range", min: 10, max: 60, step: 1 } },
+    timeScale: { control: { type: "range", min: 0.1, max: 3, step: 0.05 } },
+  },
+  args: { startOutside: 18, replayAfter: 34, timeScale: 1 },
+  render: (args) =>
+    mountStage((stage) => {
+      const cam = gameCamera(stage);
+      const state = createGameState(stage.aspect());
+      const sync = new SceneSync(stage.scene, new MeshFactory(stage.scene), stage.shadows);
+      sync.rebuildWorld(state);
+      stageLanding(state, args.startOutside);
+
+      let time = 0;
+      let sinceStart = 0;
+      return (dt) => {
+        time += dt;
+        sinceStart += dt;
+        step(state, dt);
+        if (sinceStart >= args.replayAfter) {
+          sinceStart = 0;
+          stageLanding(state, args.startOutside); // new plane id: fresh mesh
         }
         cam.frame(dt, time);
         sync.syncPlanes(state, time);

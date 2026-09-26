@@ -83,8 +83,44 @@ export const WARNING_DISTANCE = COLLISION_DISTANCE * 2.5;
 /** Pointer must go down within this distance of a plane to grab it. */
 export const PLANE_GRAB_RADIUS = PLANE_RADIUS * 3;
 
-/** Height planes fly at in the 3D scene (purely visual). */
-export const FLIGHT_ALTITUDE = 3;
+/**
+ * Height planes fly at inside the airspace (3D scene units, purely visual).
+ * Clears the tallest scenery round the field: trees reach ~5.5 and the
+ * control tower's antenna ~8.5 (render/airportGrounds.ts). Planes are drawn
+ * over their ground track (render/sceneSync.ts `placeOverTrack`), so height
+ * only shows as the gap to their shadow and in the crash camera's orbit.
+ */
+export const FLIGHT_ALTITUDE = 9;
+
+/**
+ * Height of planes well outside the airspace: arrivals descend from it as
+ * they approach, departures climb back to it as they leave.
+ */
+export const OUTER_FLIGHT_ALTITUDE = 16;
+
+/**
+ * Distance past the airspace edge over which planes climb from
+ * `FLIGHT_ALTITUDE` to `OUTER_FLIGHT_ALTITUDE` (world units).
+ */
+export const ALTITUDE_TRANSITION = 14;
+
+/**
+ * Glide slope: on an anchored path (see `Plane.pathAnchored`), a plane
+ * starts descending this far (path length, world units) before the
+ * threshold and crosses it at `THRESHOLD_ALTITUDE`, then flares onto the
+ * runway over `FLARE_DISTANCE`.
+ */
+export const APPROACH_DISTANCE = 22;
+export const THRESHOLD_ALTITUDE = 1.2;
+
+/**
+ * Fake perspective: the camera is orthographic, so a plane's size wouldn't
+ * change with height. Its model grows by this fraction per unit above
+ * `FLIGHT_ALTITUDE` and shrinks by it per unit below: ~0.83× on the ground,
+ * ~1.14× at `OUTER_FLIGHT_ALTITUDE`. Exactly 1 at `FLIGHT_ALTITUDE`, where
+ * every collision happens, so the model still matches `COLLISION_DISTANCE`.
+ */
+export const ALTITUDE_SCALE_PER_UNIT = 0.02;
 
 // ---------------------------------------------------------------------------
 // Steering (see core/plane.ts)
@@ -529,10 +565,10 @@ export const TREE_STREAM_CLEARANCE = 3.5;
 
 /**
  * Tree size range. A scale-1 tree is ~3.5 units tall and ~2.5 wide (so up
- * to ~5.5 × 4 here, deliberately oversized to read at game zoom) — taller
- * than `FLIGHT_ALTITUDE`, which is fine: planes, paths and warning rings draw
- * in a later rendering group (see render/scene.ts), so they always show on
- * top of the scenery.
+ * to ~5.5 × 4 here, deliberately oversized to read at game zoom), still
+ * under `FLIGHT_ALTITUDE`. Planes, paths and warning rings also draw in a
+ * later rendering group (see render/scene.ts), so they always show on top
+ * of the scenery anyway (e.g. a plane gliding down over the trees).
  */
 export const TREE_SCALE_MIN = 1.0;
 export const TREE_SCALE_MAX = 2.5;

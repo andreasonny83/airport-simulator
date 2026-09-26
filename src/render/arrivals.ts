@@ -9,7 +9,7 @@
  */
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { COLOR_HEX, FLIGHT_ALTITUDE } from "../config";
+import { COLOR_HEX } from "../config";
 import { headingVector } from "../core/math";
 import type { GameState, Vec2 } from "../core/types";
 import type { ArrivalMarker } from "../ui/arrivalArrows";
@@ -53,7 +53,9 @@ export function arrivalMarkers(
   const sy = cssH / renderH;
 
   const project = (p: Vec2, out: Vector3): Vector3 => {
-    toScene(p, state.world, FLIGHT_ALTITUDE, scratchWorld);
+    // On the ground: planes are drawn over their ground track, whatever
+    // their height (see `placeOverTrack` in sceneSync.ts).
+    toScene(p, state.world, 0, scratchWorld);
     Vector3.ProjectToRef(scratchWorld, Matrix.IdentityReadOnly, transform, viewport, out);
     out.x *= sx;
     out.y *= sy;

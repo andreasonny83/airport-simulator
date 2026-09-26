@@ -13,14 +13,18 @@ import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBu
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import {
+  ALTITUDE_SCALE_PER_UNIT,
+  APPROACH_DISTANCE,
   COLOR_HEX,
   FLARE_DISTANCE,
   FLIGHT_ALTITUDE,
   LANDING_SPEED_START,
   MAX_TURN_RATE,
   PLANE_SPEED,
+  THRESHOLD_ALTITUDE,
 } from "../config";
-import { angleDelta, lerp, normalizeAngle } from "../core/math";
+import { cruiseAltitude } from "../core/layout";
+import { angleDelta, distance, lerp, normalizeAngle } from "../core/math";
 import type { GameState, Plane, RunwayColor, WorldSize } from "../core/types";
 import { aircraftKindFor, animateAircraft, type AircraftRig } from "./aircraft";
 import { AirfieldFactory, type AirfieldView } from "./airfield";
@@ -58,6 +62,32 @@ export const ANCHOR_RING_HOLD = 2;
 export const ANCHOR_RING_FADE = 0.8;
 /** Height of a plane on the ground (sitting on its wheels on the runway). */
 const RUNWAY_ALTITUDE = 0.35;
+/**
+ * Fastest a plane climbs or descends (scene units / second). Faster than the
+ * glide slope and the climb out of the airspace, so those are followed
+ * exactly; it only smooths sudden changes of target, e.g. a go-around when
+ * an anchored path is redrawn low over the field.
+ */
+const MAX_VERTICAL_SPEED = 4;
+
+/**
+ * Height `plane` should be flying at now: its cruise altitude over the
+ * current position (see `cruiseAltitude`), or, on an anchored path within
+ * `APPROACH_DISTANCE` of the threshold, a straight glide slope from there
+ * down to `THRESHOLD_ALTITUDE` on the threshold (the path's last point).
+ */
+function airborneAltitude(plane: Plane, world: WorldSize): number {
+  const cruise = cruiseAltitude(plane.pos, world);
+  const path = plane.path;
+  if (!plane.pathAnchored || path.length === 0) return cruise;
+  // Path length left to fly, summed back from the threshold; only the last
+  // `APPROACH_DISTANCE` matters, so long paths stop early.
+  let left = 0;
+  for (let i = path.length - 1; i >= 0 && left < APPROACH_DISTANCE; i--) {
+    left += distance(path[i]!, i > 0 ? path[i - 1]! : plane.pos);
+  }
+  return lerp(THRESHOLD_ALTITUDE, cruise, Math.min(1, left / APPROACH_DISTANCE));
+}
 
 /** Fraction of the way to a target that exponential easing covers in `dt`. */
 function ease(dt: number, tau: number): number {
@@ -82,6 +112,10 @@ interface PlaneView {
   bank: number;
   /** True once moved to the default rendering group on touchdown. */
   grounded: boolean;
+  /** Displayed height while airborne (null until first sync). */
+  altitude: number | null;
+  /** Height at touchdown, where the flare starts (null while airborne). */
+  touchdownAltitude: number | null;
 }
 
 export class SceneSync {
@@ -167,6 +201,8 @@ export class SceneSync {
           yaw: null,
           bank: 0,
           grounded: false,
+          altitude: null,
+          touchdownAltitude: null,
         };
         this.views.set(plane.id, view);
         // Solid parts only: prop blur discs and lights cast no shadow.
@@ -236,10 +272,24 @@ export class SceneSync {
   ): void {
     const ground = plane.ground;
 
-    // Altitude: cruise, then settle onto the runway over the first few units
-    // rolled after touchdown.
+    // Altitude: cruise (higher outside the airspace) and glide down an
+    // anchored approach, rate-limited so a new target never makes the plane
+    // jump. After touchdown, settle onto the runway over the first few units
+    // rolled.
     const descent = ground ? Math.min(1, ground.travelled / FLARE_DISTANCE) : 0;
-    const altitude = lerp(FLIGHT_ALTITUDE, RUNWAY_ALTITUDE, descent);
+    let altitude: number;
+    if (ground) {
+      view.touchdownAltitude ??= view.altitude ?? RUNWAY_ALTITUDE;
+      altitude = lerp(view.touchdownAltitude, RUNWAY_ALTITUDE, descent);
+    } else {
+      const target = airborneAltitude(plane, world);
+      const step = MAX_VERTICAL_SPEED * dt;
+      view.altitude =
+        view.altitude === null
+          ? target
+          : view.altitude + Math.max(-step, Math.min(step, target - view.altitude));
+      altitude = view.altitude;
+    }
 
     // On the ground, draw with the scenery (depth-tested) rather than on top
     // of it, so a plane rolling into its hangar disappears behind the walls.
@@ -253,6 +303,11 @@ export class SceneSync {
     const wind = windEffect(time, plane.id, plane.heading, 1 - descent);
     const root = view.aircraft.root;
     this.placeOverTrack(plane, world, altitude, root.position);
+    // Fake perspective (the camera is orthographic): higher planes look a
+    // little bigger, planes on the ground a little smaller. Driven by the
+    // eased altitude, so the size changes as smoothly as the height. The
+    // warning ring keeps its size: it marks the real collision distance.
+    root.scaling.setAll(1 + (altitude - FLIGHT_ALTITUDE) * ALTITUDE_SCALE_PER_UNIT);
     root.position.x += wind.drift.x;
     root.position.z -= wind.drift.y; // sim +y is scene -z (see coords.ts)
     root.position.y += wind.lift;

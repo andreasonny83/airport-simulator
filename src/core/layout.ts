@@ -8,10 +8,12 @@
  */
 import {
   AIRSPACE_MARGIN,
+  ALTITUDE_TRANSITION,
   CAMERA_FIT_PADDING,
   CROSSING_EXIT_U,
   CAMERA_TILT,
   FLIGHT_ALTITUDE,
+  OUTER_FLIGHT_ALTITUDE,
   RUNWAY_LAYOUT,
   RUNWAY_LENGTH,
   RUNWAY_THRESHOLD_INSET,
@@ -63,8 +65,9 @@ export function airspaceBounds(world: WorldSize): Bounds {
  * its zoom (render/camera.ts).
  *
  * - screen X: ground x maps one-to-one;
- * - screen Y: ground depth is foreshortened by cos(tilt), and altitude
- *   adds up to FLIGHT_ALTITUDE · sin(tilt) (planes on the far edge).
+ * - screen Y: ground depth is foreshortened by cos(tilt). Altitude adds
+ *   nothing: planes are drawn over their ground track (render/sceneSync.ts
+ *   `placeOverTrack`), however high they fly.
  *
  * It only depends on the world, never on the current heading, so rotating
  * the view never changes the scale. (Turned away from the default heading,
@@ -75,8 +78,7 @@ export function airspaceBounds(world: WorldSize): Bounds {
 export function viewHalfHeight(world: WorldSize, aspect: number): number {
   const a = airspaceBounds(world);
   const maxX = (a.maxX - a.minX) / 2;
-  const maxY =
-    ((a.maxY - a.minY) / 2) * Math.cos(CAMERA_TILT) + FLIGHT_ALTITUDE * Math.sin(CAMERA_TILT);
+  const maxY = ((a.maxY - a.minY) / 2) * Math.cos(CAMERA_TILT);
   return Math.max(maxY, maxX / safeViewAspect(aspect)) * CAMERA_FIT_PADDING;
 }
 
@@ -123,6 +125,24 @@ export function maxViewRadius(world: WorldSize): number {
  */
 export function panFraction(zoom: number): number {
   return Math.min(1, Math.max(0, (zoom - ZOOM_MIN) / (1 - ZOOM_MIN)));
+}
+
+/**
+ * Height a plane cruises at over `p` (3D scene units, purely visual):
+ * `FLIGHT_ALTITUDE` inside the airspace, rising smoothly to
+ * `OUTER_FLIGHT_ALTITUDE` over the first `ALTITUDE_TRANSITION` units past
+ * its edge. Arrivals descend as they fly in; departures climb as they leave.
+ * Continuous everywhere, so a plane never jumps as it crosses the edge.
+ */
+export function cruiseAltitude(p: Vec2, world: WorldSize): number {
+  const b = airspaceBounds(world);
+  // Distance to the airspace rectangle (0 inside it).
+  const dx = Math.max(b.minX - p.x, 0, p.x - b.maxX);
+  const dy = Math.max(b.minY - p.y, 0, p.y - b.maxY);
+  const t = Math.min(1, Math.hypot(dx, dy) / ALTITUDE_TRANSITION);
+  // Smoothstep: level off at both ends rather than kinking into the climb.
+  const s = t * t * (3 - 2 * t);
+  return FLIGHT_ALTITUDE + (OUTER_FLIGHT_ALTITUDE - FLIGHT_ALTITUDE) * s;
 }
 
 /** True if `p` is inside the airspace (edge included). */
