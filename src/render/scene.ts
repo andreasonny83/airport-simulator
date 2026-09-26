@@ -76,12 +76,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   key.shadowMinZ = 1;
   key.shadowMaxZ = SUN_DISTANCE * 2;
 
-  const shadows = new ShadowGenerator(2048, key);
+  // 4096: the frustum spans the whole map, so at 2048 a plane's wings were
+  // only ~2 texels wide and PCF blurred its shadow into a faint smudge. At
+  // 4096 planes cast a crisp, readable silhouette that helps pick them out
+  // against the grass. The caster geometry cost is unchanged; only the depth
+  // fill grows (holds 60 fps in the full game on a laptop).
+  const shadows = new ShadowGenerator(4096, key);
   // PCF gives soft-edged shadows for a single texture lookup budget (WebGL2).
   shadows.usePercentageCloserFiltering = true;
   shadows.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
   shadows.bias = 0.002;
-  shadows.darkness = 0.35;
+  // 0 = black, 1 = no shadow. Dark enough that plane shadows read at a
+  // glance; the sky fill light keeps shaded ground from going murky.
+  shadows.darkness = 0.25;
 
   return { engine, scene, shadows };
 }

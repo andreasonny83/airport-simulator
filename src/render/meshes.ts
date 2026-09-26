@@ -162,17 +162,19 @@ export class MeshFactory {
     const paint = new StandardMaterial("aircraft-paint", this.scene);
     // White diffuse: the per-vertex livery colours supply the hue.
     paint.diffuseColor = Color3.White();
-    // Satin paint: a soft sun sheen that slides along the fuselage as the
-    // plane turns. Brighter reads as a light source rather than gloss.
-    paint.specularColor = new Color3(0.18, 0.18, 0.18);
-    paint.specularPower = 24;
-    // A faint rim light on surfaces edge-on to the camera separates the
-    // silhouette from the grass without washing out the team colour.
-    paint.emissiveColor = new Color3(0.06, 0.06, 0.06);
+    // Glossy paint: a tight, bright sun glint that slides along the fuselage
+    // and wings as the plane turns. The sparkle is what catches the eye
+    // against the matte landscape (nothing else in the scene is this shiny).
+    paint.specularColor = new Color3(0.55, 0.55, 0.52);
+    paint.specularPower = 48;
+    // Rim light on surfaces edge-on to the camera: a pale sky-lit edge that
+    // lifts the silhouette off the grass without a hard outline, and without
+    // washing out the team colour on the faces turned towards the camera.
+    paint.emissiveColor = new Color3(0.08, 0.08, 0.08);
     paint.emissiveFresnelParameters = new FresnelParameters({
-      bias: 0.1,
-      power: 2,
-      leftColor: new Color3(0.28, 0.3, 0.32),
+      bias: 0.15,
+      power: 1.6,
+      leftColor: new Color3(0.5, 0.53, 0.58),
       rightColor: Color3.Black(),
     });
     // Thin slabs (wings, fins) are modelled without caring about winding.
