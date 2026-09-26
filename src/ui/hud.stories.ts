@@ -22,6 +22,8 @@ interface HudArgs extends HudCallbacks {
   toastColor: RunwayColor | "none";
   /** Show sample arrival arrows round the screen edge. */
   arrivals: boolean;
+  /** Show the "track plane active" badge, as while following a plane. */
+  tracking: boolean;
 }
 
 /**
@@ -54,6 +56,7 @@ function applyArgs(hud: Hud, args: HudArgs): void {
   if (args.phase === "gameover") hud.showGameOver(args.score);
   else if (args.phase !== "start") hud.hideOverlay();
   hud.setPhase(args.phase);
+  hud.setTracking(args.tracking);
   if (args.toast) {
     hud.showToast(args.toast, args.toastColor === "none" ? undefined : COLOR_HEX[args.toastColor]);
   }
@@ -102,6 +105,7 @@ const meta: Meta<HudArgs> = {
     toast: "",
     toastColor: "none",
     arrivals: false,
+    tracking: false,
     onStart: fn(),
     onTogglePause: fn(),
     onRotate: fn(),
@@ -124,6 +128,14 @@ export const Playing: Story = { args: { phase: "playing", score: 12 } };
  * (`data-arrow-avoid` in hudMarkup.ts).
  */
 export const Arrivals: Story = { args: { phase: "playing", score: 8, arrivals: true } };
+
+/**
+ * Following a plane (right-click one in the game): the "track plane active"
+ * badge bottom-left, with its blinking dot. Arrival arrows slide clear of it.
+ */
+export const Tracking: Story = {
+  args: { phase: "playing", score: 5, arrivals: true, tracking: true },
+};
 
 /** Paused banner over the (frozen) game. */
 export const Paused: Story = { args: { phase: "paused", score: 12 } };

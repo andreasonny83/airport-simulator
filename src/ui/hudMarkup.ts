@@ -90,9 +90,36 @@ export function cameraControlsMarkup(): string {
 }
 
 /**
+ * "Track plane" badge, bottom-left: shown while the camera follows a plane
+ * (right-click one), with a blinking red dot (`.tracking-dot` in style.css)
+ * and how to leave the mode. Hidden until `setTracking(true)`; arrival
+ * arrows slide clear of it while it shows. On narrow screens it sits above
+ * the camera buttons instead of beside them.
+ */
+export function trackingIndicatorMarkup(): string {
+  return `
+    <div
+      id="trackingIndicator"
+      data-arrow-avoid
+      role="status"
+      class="pointer-events-none absolute bottom-4 left-4 z-10 hidden max-w-[calc(100%-2rem)] items-center max-sm:bottom-18 gap-3 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 shadow-lg backdrop-blur-sm"
+    >
+      <span class="tracking-dot h-3 w-3 shrink-0 rounded-full bg-red-500"></span>
+      <div>
+        <div class="text-sm font-bold tracking-wider text-red-400 uppercase">
+          Track plane active
+        </div>
+        <div class="text-xs text-slate-300">
+          Right-click to return to the map · drag or arrow keys to pan away
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
  * Layer for arrival arrows (see arrivalArrows.ts). Below the other HUD
  * panels; arrows slide out from under any element marked
- * `data-arrow-avoid` (score, pause, camera buttons), so neither hides the other.
+ * `data-arrow-avoid` (score, pause, camera buttons, tracking badge), so neither hides the other.
  */
 export function arrivalLayerMarkup(): string {
   return `
@@ -161,6 +188,7 @@ export function hudMarkup(): string {
     pauseButtonMarkup(),
     pausedBannerMarkup(),
     toastMarkup(),
+    trackingIndicatorMarkup(),
     cameraControlsMarkup(),
     overlayMarkup(),
   ].join("");

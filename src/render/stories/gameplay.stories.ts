@@ -27,7 +27,12 @@
  *               and converging arrivals all swerve apart, then resume
  *               course. Replays on a loop.
  *   - LiveGame: the whole game (sim, input, HUD) in a story, with slow motion
- *               (`showAirspace` draws the airspace edge).
+ *               (`showAirspace` draws the airspace edge). Right-click a
+ *               plane to follow it, with the "track plane active" badge
+ *               bottom-left; right-click again to return (`autoFollow`
+ *               follows the first plane). Follow: FOLLOW_ZOOM in
+ *               config.ts, `follow` / `returnFromFollow` / `trackPlane` in
+ *               camera.ts, the badge in ui/hudMarkup.ts + style.css.
  *
  * Tuning loop: PATH_* / ANCHOR_RING_* / HOVER_* / YAW_EASE / BANK_EASE in sceneSync.ts, ring sizes and
  * colours in meshes.ts, arrow placement in arrivals.ts, arrow look in
@@ -69,6 +74,7 @@ import { arrivalLayerMarkup } from "../../ui/hudMarkup";
 import { arrivalMarkers } from "../arrivals";
 import { MeshFactory } from "../meshes";
 import { ANCHOR_RING_FADE, ANCHOR_RING_HOLD, SceneSync } from "../sceneSync";
+import { trackPlane } from "../camera";
 import { gameCamera, mountStage } from "./stage";
 
 const DEG = Math.PI / 180;
@@ -466,15 +472,18 @@ interface LiveArgs {
   timeScale: number;
   /** Draw the airspace edge, as `DEBUG_SHOW_AIRSPACE` does in the game. */
   showAirspace: boolean;
+  /** Follow the shift's first plane, as right-clicking it would. */
+  autoFollow: boolean;
 }
 
 /**
- * The full game: draw paths with the mouse, land planes, crash. Uses the
- * same modules as main.ts, minus window-level listeners (keyboard, resize).
+ * The full game: draw paths with the mouse, land planes, crash, right-click
+ * a plane to follow it. Uses the same modules as main.ts, minus
+ * window-level listeners (keyboard, resize).
  */
 export const LiveGame: StoryObj<LiveArgs> = {
   argTypes: { timeScale: { control: { type: "range", min: 0.1, max: 2, step: 0.05 } } },
-  args: { autoStart: true, timeScale: 1, showAirspace: false },
+  args: { autoStart: true, timeScale: 1, showAirspace: false, autoFollow: false },
   render: (args) =>
     mountStage((stage) => {
       const cam = gameCamera(stage);
@@ -504,7 +513,18 @@ export const LiveGame: StoryObj<LiveArgs> = {
         stage.scene,
         cam.controller.camera,
         () => state,
+        {
+          onPan: (dx, dy) => cam.controller.dragBy(dx, dy),
+          onFollow: (planeId) => follow(planeId),
+        },
       );
+      /** Same as main.ts: follow a plane, or right-click again to return. */
+      const follow = (planeId: number | null) => {
+        if (cam.controller.following) cam.controller.returnFromFollow();
+        else if (planeId !== null) cam.controller.follow(trackPlane(() => state, planeId));
+      };
+      /** `autoFollow` picks the first plane once; after that it's up to the mouse. */
+      let autoFollowed = false;
       if (args.autoStart) begin();
 
       let time = 0;
@@ -530,7 +550,12 @@ export const LiveGame: StoryObj<LiveArgs> = {
           gameOverIn = null;
           hud.showGameOver(state.score);
         }
+        if (args.autoFollow && !autoFollowed && state.planes[0]) {
+          autoFollowed = true;
+          follow(state.planes[0].id);
+        }
         cam.frame(dt, time);
+        hud.setTracking(cam.controller.following);
         sync.setHighlighted(pointer.refreshHover());
         sync.syncPlanes(state, time);
         hud.setArrivals(arrivalMarkers(state, stage.scene, stage.canvas));

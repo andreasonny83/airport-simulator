@@ -642,6 +642,16 @@ export const ZOOM_STEP = 1.25;
 export const PAN_SPEED = 1.2;
 
 // ---------------------------------------------------------------------------
+// Follow camera (render/camera.ts, input/pointer.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Zoom the camera eases to when following a plane (right-click it; 1 =
+ * default view). A player already zoomed in closer keeps their zoom.
+ */
+export const FOLLOW_ZOOM = 2.6;
+
+// ---------------------------------------------------------------------------
 // Crash cinematic (render/camera.ts, render/crash.ts, main.ts)
 // ---------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
  *
  * Useful for styling a single piece without the rest of the HUD on top.
  * Elements that start hidden in the game (pause button, paused banner,
- * toast) are forced visible here.
+ * toast, tracking badge) are forced visible here.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import { createArrivalArrows } from "./arrivalArrows";
@@ -15,6 +15,7 @@ import {
   pausedBannerMarkup,
   scorePanelMarkup,
   toastMarkup,
+  trackingIndicatorMarkup,
 } from "./hudMarkup";
 
 /** Full-window stage matching the game's `<body>`, holding one template. */
@@ -75,6 +76,19 @@ export const Toast: StoryObj<{ text: string; color: string }> = {
     toast.textContent = text;
     toast.style.color = color;
     toast.classList.remove("opacity-0");
+    return root;
+  },
+};
+
+/**
+ * "Track plane active" badge, bottom-left, shown while the camera follows a
+ * plane (right-click one in the game). The dot blinks via `.tracking-dot` /
+ * `tracking-blink` in style.css.
+ */
+export const TrackingIndicator: Story = {
+  render: () => {
+    const root = stage(trackingIndicatorMarkup());
+    part(root, "trackingIndicator").classList.replace("hidden", "flex");
     return root;
   },
 };

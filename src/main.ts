@@ -12,7 +12,7 @@ import type { SimEvent } from "./core/types";
 import { attachPanKeys } from "./input/keyboard";
 import { attachPointerInput } from "./input/pointer";
 import { arrivalMarkers } from "./render/arrivals";
-import { CameraController } from "./render/camera";
+import { CameraController, trackPlane } from "./render/camera";
 import { MeshFactory } from "./render/meshes";
 import { createScene } from "./render/scene";
 import { SceneSync } from "./render/sceneSync";
@@ -63,6 +63,12 @@ const hud = createHud(document.body, {
 const pointer = attachPointerInput(canvas, scene, cameraController.camera, () => state, {
   // Dragging empty ground grabs the map.
   onPan: (dx, dy) => cameraController.dragBy(dx, dy),
+  // Right-click a plane to follow it; again (or on empty ground) to stop.
+  // Right-click again (anywhere) to go back to the view from before.
+  onFollow: (planeId) => {
+    if (cameraController.following) cameraController.returnFromFollow();
+    else if (planeId !== null) cameraController.follow(trackPlane(() => state, planeId));
+  },
 });
 
 // Arrow keys pan the map (held keys are polled in the render loop).
@@ -129,6 +135,9 @@ engine.runRenderLoop(() => {
 
   cameraController.panBy(panKeys.direction(), dt);
   cameraController.update(dt, aspect());
+  // Badge on while following; covers every way out (right-click, pan,
+  // plane gone, crash), since the camera decides those itself.
+  hud.setTracking(cameraController.following);
   // Light up the plane under the mouse (or held): planes move under a still
   // cursor, so hover is re-checked every frame, not only on pointer moves.
   sceneSync.setHighlighted(pointer.refreshHover());

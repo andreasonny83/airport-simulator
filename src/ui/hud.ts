@@ -1,6 +1,7 @@
 /**
  * HTML HUD layered over the canvas: score, start/game-over overlay, pause
- * button, toast notices, arrival arrows and the camera buttons. Markup lives in
+ * button, toast notices, arrival arrows, the "track plane" badge and the
+ * camera buttons. Markup lives in
  * hudMarkup.ts (shared with Storybook); this module injects and wires it up.
  */
 import type { GamePhase } from "../core/types";
@@ -27,6 +28,11 @@ export interface Hud {
   showToast(text: string, color?: string): void;
   /** Arrows on the screen edge for planes about to fly in (call every frame). */
   setArrivals(markers: readonly ArrivalMarker[]): void;
+  /**
+   * Show or hide the "track plane active" badge (the camera is following a
+   * plane). Cheap to call every frame: the DOM is only touched on change.
+   */
+  setTracking(active: boolean): void;
 }
 
 /** How long a toast stays fully visible before fading out (ms). */
@@ -69,6 +75,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const pauseBtn = byId<HTMLButtonElement>("pauseBtn");
   const pausedBanner = byId("pausedBanner");
   const toast = byId("toast");
+  const tracking = byId("trackingIndicator");
+  let trackingShown = false;
   const arrivals = createArrivalArrows(
     byId("arrivals"),
     Array.from(root.querySelectorAll<HTMLElement>("[data-arrow-avoid]")),
@@ -125,6 +133,13 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     },
     setArrivals(markers) {
       arrivals.update(markers);
+    },
+    setTracking(active) {
+      if (active === trackingShown) return;
+      trackingShown = active;
+      // `hidden` and `flex` both set `display`, so swap them rather than stack.
+      tracking.classList.toggle("hidden", !active);
+      tracking.classList.toggle("flex", active);
     },
   };
 }

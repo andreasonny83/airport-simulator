@@ -9,6 +9,9 @@
  * pans when no plane is in grab range (or when paths can't be drawn, e.g.
  * while paused), so routing is never stolen by the camera.
  *
+ * Right-click: picks a plane for the camera to follow (see `onFollow`); the
+ * browser's context menu is suppressed on the canvas.
+ *
  * Hover: a mouse or pen resting over a grabbable plane turns the cursor into
  * a pointer and reports the plane (see `refreshHover`), so the scene can
  * light it up as "you can drag this".
@@ -48,12 +51,19 @@ function screenToWorld(
   return fromScene(ray.origin.add(ray.direction.scale(t)), state.world);
 }
 
-/** Closest steerable plane (see `isSteerable`) within grab range of `point`, if any. */
-function findPlaneNear(planes: readonly Plane[], point: Vec2): Plane | null {
+/**
+ * Closest plane passing `accept` (default: steerable, see `isSteerable`)
+ * within grab range of `point`, if any.
+ */
+function findPlaneNear(
+  planes: readonly Plane[],
+  point: Vec2,
+  accept: (plane: Plane) => boolean = isSteerable,
+): Plane | null {
   let best: Plane | null = null;
   let bestDist = PLANE_GRAB_RADIUS;
   for (const plane of planes) {
-    if (!isSteerable(plane)) continue;
+    if (!accept(plane)) continue;
     const d = distance(plane.pos, point);
     if (d < bestDist) {
       best = plane;
@@ -74,6 +84,17 @@ export interface PointerFeedback {
    * Without this hook, drags that miss a plane do nothing.
    */
   onPan?: (dx: number, dy: number) => void;
+  /**
+   * Right-click: the id of the plane under the pointer (any plane still in
+   * the game: flying, departing, or rolling/taxiing on the ground), or null
+   * when it missed every plane. Works while playing or paused.
+   */
+  onFollow?: (planeId: number | null) => void;
+}
+
+/** Planes a right-click may pick to follow: any still visible in the game. */
+function isFollowable(plane: Plane): boolean {
+  return plane.phase !== "landed" && plane.phase !== "departed";
 }
 
 /** Handle on attached pointer input. */
@@ -126,6 +147,17 @@ export function attachPointerInput(
   };
 
   const onDown = (e: PointerEvent) => {
+    // Secondary (right) button: pick a plane for the camera to follow.
+    if (e.button === 2) {
+      const state = getState();
+      if (!feedback.onFollow || (state.phase !== "playing" && state.phase !== "paused")) return;
+      const { x, y } = toCanvas(e);
+      const hit = screenToWorld(scene, camera, state, x, y);
+      const plane = hit && findPlaneNear(state.planes, hit, isFollowable);
+      feedback.onFollow(plane ? plane.id : null);
+      e.preventDefault();
+      return;
+    }
     // Only the primary (left) mouse button draws or pans; touch/pen report 0.
     if (e.button !== 0) return;
     const state = getState();
@@ -190,6 +222,9 @@ export function attachPointerInput(
     hoverAt = null;
   };
 
+  // Right-click belongs to the follow camera, not the browser's menu.
+  const onContextMenu = (e: Event) => e.preventDefault();
+
   const refreshHover = (): ReadonlySet<number> => {
     highlighted.clear();
     // A plane being routed stays lit for as long as it's held.
@@ -220,6 +255,7 @@ export function attachPointerInput(
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
   canvas.addEventListener("pointerleave", onLeave);
+  canvas.addEventListener("contextmenu", onContextMenu);
 
   return {
     refreshHover,
@@ -229,6 +265,7 @@ export function attachPointerInput(
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("contextmenu", onContextMenu);
     },
   };
 }

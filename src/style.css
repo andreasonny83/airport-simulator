@@ -38,11 +38,31 @@
       transition hover:bg-slate-700 active:scale-95;
   }
 
+  /* "Track plane" badge (hudMarkup.ts): a red recording-style blinking dot. */
+  .tracking-dot {
+    box-shadow: 0 0 8px rgb(239 68 68 / 0.9);
+    animation: tracking-blink 1.1s ease-in-out infinite;
+  }
+
   /* Arrival arrow (hudMarkup.ts): the ring pulses outward to catch the eye. */
   .arrival-ring {
     transform-box: fill-box;
     transform-origin: center;
     animation: arrival-pulse 1s ease-out infinite;
+  }
+}
+
+@keyframes tracking-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  60%,
+  90% {
+    opacity: 0.15;
+  }
+  100% {
+    opacity: 1;
   }
 }
 
